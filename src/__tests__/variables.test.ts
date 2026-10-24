@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { GetPresets } from '../presets.js'
-import { GetVariableDefinitions, GetVariableValues } from '../variables.js'
+import { ChangedVariableValues, GetVariableDefinitions, GetVariableValues } from '../variables.js'
 import { director, guest, local, statesOf } from './helpers/streams.js'
 
 describe('variables', () => {
@@ -123,5 +123,22 @@ describe('presets', () => {
 	it('builds no presets without guests or a director', () => {
 		const { presets } = GetPresets(statesOf(local))
 		expect(presets).toEqual({})
+	})
+})
+
+describe('ChangedVariableValues', () => {
+	it('returns only the values that differ from those sent', () => {
+		expect(
+			ChangedVariableValues({ a: 'Muted', b: ['1', '3'], c: 3 }, { a: 'Muted', b: ['1', '3'], c: 4, d: 'new' }),
+		).toEqual({ c: 4, d: 'new' })
+	})
+
+	it('compares lists by their contents', () => {
+		expect(ChangedVariableValues({ b: ['1', '3'] }, { b: ['1'] })).toEqual({ b: ['1'] })
+	})
+
+	it('returns nothing when nothing changed', () => {
+		const values = GetVariableValues(statesOf(director, guest))
+		expect(ChangedVariableValues(values, GetVariableValues(statesOf(director, guest)))).toEqual({})
 	})
 })

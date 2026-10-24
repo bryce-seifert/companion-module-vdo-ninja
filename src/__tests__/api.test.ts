@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildRequest, parseDetails, parseMessage } from '../api.js'
+import { buildRequest, isValidStreamID, parseDetails, parseMessage } from '../api.js'
 import getDetailsPush from './fixtures/getDetails-push.json' with { type: 'json' }
 
 const json = (value: unknown) => JSON.stringify(value)
@@ -63,6 +63,17 @@ describe('parseMessage', () => {
 		})
 	})
 
+	it('ignores updates with an invalid stream ID', () => {
+		expect(parseMessage(json({ update: { streamID: '__proto__', action: 'muted', value: true } }))).toEqual({
+			type: 'ignored',
+			reason: 'invalid stream ID',
+		})
+		expect(parseMessage(json({ update: { streamID: 'dir', action: 'endViewConnection', value: 'a b' } }))).toEqual({
+			type: 'ignored',
+			reason: 'invalid stream ID for endViewConnection',
+		})
+	})
+
 	it('ignores updates it does not handle', () => {
 		expect(parseMessage(json({ update: { streamID: 'abc', action: 'tip', value: {} } }))).toEqual({
 			type: 'ignored',
@@ -108,8 +119,36 @@ describe('parseDetails', () => {
 		expect(parseDetails({ a: { streamID: 'one' }, b: { label: 'x' }, c: 3 })).toEqual([{ streamID: 'one' }])
 	})
 
+	it('drops entries with an invalid stream ID', () => {
+		expect(
+			parseDetails({
+				a: { streamID: '__proto__' },
+				b: { streamID: 'has space' },
+				c: { streamID: '' },
+				d: { streamID: 'ok_1-2' },
+			}),
+		).toEqual([{ streamID: 'ok_1-2' }])
+	})
+
+	it('keeps only the fields the module reads', () => {
+		const [stream] = parseDetails({
+			a: { streamID: 'one', muted: true, miscellaneous: { CPU: '14 threads' }, chunkedBufferDefault: 3000 },
+		})
+		expect(stream).toEqual({ streamID: 'one', muted: true })
+	})
+
 	it('returns nothing for non-object results', () => {
 		expect(parseDetails('timeout')).toEqual([])
 		expect(parseDetails(null)).toEqual([])
+	})
+})
+
+describe('isValidStreamID', () => {
+	it.each(['abc', 'ABC_123', 'with-dash', 'a'.repeat(128)])('accepts %s', (id) => {
+		expect(isValidStreamID(id)).toBe(true)
+	})
+
+	it.each(['', 'has space', 'semi;colon', '$(var)', '__proto__', 'a'.repeat(129), 3, null])('rejects %j', (id) => {
+		expect(isValidStreamID(id)).toBe(false)
 	})
 })

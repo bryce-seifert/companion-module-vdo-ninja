@@ -2,15 +2,15 @@ import { InstanceBase, InstanceStatus, type SomeCompanionConfigField } from '@co
 import { GetActions, type ActionsSchema } from './actions.js'
 import type { GuestCommands, GuestTarget, LocalCommands } from './api.js'
 import { VdoNinjaClient, type ClientStatus } from './client.js'
-import { GetConfigFields, type ModuleConfig } from './config.js'
+import { GetConfigFields, GetServerUrl, type ModuleConfig, type ModuleSecrets } from './config.js'
 import { GetFeedbacks, type FeedbacksSchema } from './feedbacks.js'
 import { GetPresets } from './presets.js'
 import { UpgradeScripts } from './upgrades.js'
-import { GetVariableDefinitions, GetVariableValues, type VariablesSchema } from './variables.js'
+import { ChangedVariableValues, GetVariableDefinitions, GetVariableValues, type VariablesSchema } from './variables.js'
 
 export type ModuleSchema = {
 	config: ModuleConfig
-	secrets: undefined
+	secrets: ModuleSecrets
 	actions: ActionsSchema
 	feedbacks: FeedbacksSchema
 	variables: VariablesSchema
@@ -21,19 +21,24 @@ export { UpgradeScripts }
 const StatusMap: Record<ClientStatus, InstanceStatus> = {
 	connecting: InstanceStatus.Connecting,
 	ok: InstanceStatus.Ok,
+	disconnected: InstanceStatus.Disconnected,
 	connection_failure: InstanceStatus.ConnectionFailure,
 }
 
 export default class VDONinjaInstance extends InstanceBase<ModuleSchema> {
 	config!: ModuleConfig
+	secrets!: ModuleSecrets
 	client: VdoNinjaClient | undefined
+	/** Variable values last sent to Companion, so only changes are sent */
+	#sentValues: VariablesSchema = {}
 
 	constructor(internal: unknown) {
 		super(internal)
 	}
 
-	async init(config: ModuleConfig): Promise<void> {
+	async init(config: ModuleConfig, _isFirstInit: boolean, secrets: ModuleSecrets): Promise<void> {
 		this.config = config
+		this.secrets = secrets
 		this.setActionDefinitions(GetActions(this))
 		this.connect()
 	}
@@ -47,8 +52,9 @@ export default class VDONinjaInstance extends InstanceBase<ModuleSchema> {
 		return GetConfigFields()
 	}
 
-	async configUpdated(config: ModuleConfig): Promise<void> {
+	async configUpdated(config: ModuleConfig, secrets: ModuleSecrets): Promise<void> {
 		this.config = config
+		this.secrets = secrets
 		this.connect()
 	}
 
@@ -56,22 +62,38 @@ export default class VDONinjaInstance extends InstanceBase<ModuleSchema> {
 		this.client?.destroy()
 		this.client = undefined
 
-		if (!this.config.apiID) {
+		const apiID = this.secrets?.apiID?.trim()
+		if (!apiID) {
 			this.log('warn', `API ID required to connect to VDO.Ninja, please add one in the module settings`)
 			this.updateStatus(InstanceStatus.BadConfig, 'Missing API ID')
 			this.updateDefinitions()
 			return
 		}
 
-		const server = this.config.wsCustom && this.config.wsServer ? this.config.wsServer : 'api.vdo.ninja'
-		const client = new VdoNinjaClient({ url: `wss://${server}:443`, apiID: this.config.apiID, reconnectDelay: 1000 })
+		const server = GetServerUrl(this.config)
+		if ('error' in server) {
+			this.log('error', server.error)
+			this.updateStatus(InstanceStatus.BadConfig, server.error)
+			this.updateDefinitions()
+			return
+		}
+
+		const client = new VdoNinjaClient({
+			url: server.url,
+			apiID,
+			minReconnectDelay: 1000,
+			maxReconnectDelay: 30_000,
+			// api.vdo.ninja closes sockets idle for about two minutes; pings also keep it open
+			heartbeatInterval: 30_000,
+			detailsDelay: 100,
+		})
 		this.client = client
 
-		client.on('status', (status) => this.updateStatus(StatusMap[status]))
+		client.on('status', (status, message) => this.updateStatus(StatusMap[status], message))
 		client.on('log', (level, message) => this.log(level, message))
 		client.on('streamsChanged', () => this.updateDefinitions())
 		client.on('stateChanged', () => {
-			this.setVariableValues(GetVariableValues(client.states))
+			this.updateVariableValues()
 			this.checkAllFeedbacks()
 		})
 
@@ -87,13 +109,27 @@ export default class VDONinjaInstance extends InstanceBase<ModuleSchema> {
 		this.setVariableDefinitions(GetVariableDefinitions(source.states))
 		const { structure, presets } = GetPresets(source.states)
 		this.setPresetDefinitions(structure, presets)
+		// The definitions were replaced, so send every value again
+		this.#sentValues = {}
+		this.updateVariableValues()
+	}
+
+	updateVariableValues(): void {
+		const values = GetVariableValues(this.client?.states ?? {})
+		const changed = ChangedVariableValues(this.#sentValues, values)
+		if (Object.keys(changed).length === 0) return
+
+		this.#sentValues = values
+		this.setVariableValues(changed)
 	}
 
 	sendLocal<K extends keyof LocalCommands>(action: K, args: LocalCommands[K]): void {
-		this.client?.sendLocal(action, args)
+		if (this.client) this.client.sendLocal(action, args)
+		else this.log('warn', `Not connected to VDO.Ninja, "${action}" was not sent; check the module settings`)
 	}
 
 	sendGuest<K extends keyof GuestCommands>(action: K, target: GuestTarget, args: GuestCommands[K]): void {
-		this.client?.sendGuest(action, target, args)
+		if (this.client) this.client.sendGuest(action, target, args)
+		else this.log('warn', `Not connected to VDO.Ninja, "${action}" was not sent; check the module settings`)
 	}
 }

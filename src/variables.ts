@@ -1,4 +1,5 @@
 import type { CompanionVariableDefinitions, CompanionVariableValue } from '@companion-module/base'
+import { isDeepStrictEqual } from 'node:util'
 import { isHandRaised, isHighlighted, isQueued, slotOf } from './state.js'
 import type { StreamState } from './types.js'
 
@@ -113,4 +114,13 @@ export function GetVariableValues(states: Record<string, StreamState>): Variable
 		}
 	}
 	return values
+}
+
+/** The values that differ from those last sent */
+export function ChangedVariableValues(sent: VariablesSchema, values: VariablesSchema): VariablesSchema {
+	const changed: VariablesSchema = {}
+	for (const [id, value] of Object.entries(values)) {
+		if (!isDeepStrictEqual(sent[id], value)) changed[id] = value
+	}
+	return changed
 }

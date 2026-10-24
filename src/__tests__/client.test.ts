@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import WebSocket from 'ws'
-import { VdoNinjaClient } from '../client.js'
+import { reconnectDelay, VdoNinjaClient, type ClientOptions } from '../client.js'
 import getDetailsDirector from './fixtures/getDetails-director.json' with { type: 'json' }
 import getDetailsPush from './fixtures/getDetails-push.json' with { type: 'json' }
 import updateDetailsDirector from './fixtures/update-details-director.json' with { type: 'json' }
@@ -9,8 +9,16 @@ import { director, guest, local, statesOf } from './helpers/streams.js'
 
 const json = (value: unknown) => JSON.stringify(value)
 
-function makeClient(url = 'ws://127.0.0.1:1') {
-	return new VdoNinjaClient({ url, apiID: 'test-api', reconnectDelay: 50 })
+function makeClient(url = 'ws://127.0.0.1:1', options: Partial<ClientOptions> = {}) {
+	return new VdoNinjaClient({
+		url,
+		apiID: 'test-api',
+		minReconnectDelay: 50,
+		maxReconnectDelay: 200,
+		heartbeatInterval: 10_000,
+		detailsDelay: 20,
+		...options,
+	})
 }
 
 function withStreams(client: VdoNinjaClient, ...streams: Parameters<typeof statesOf>) {
@@ -145,6 +153,49 @@ describe('VdoNinjaClient state', () => {
 		expect(client.states.localStream.muted).toBe(false)
 	})
 
+	it('only reports a state change when something changed', () => {
+		const client = makeClient()
+		withStreams(client, local)
+		const stateChanged = vi.fn()
+		client.on('stateChanged', stateChanged)
+
+		withStreams(client, local)
+		client.handleMessage(json({ update: { streamID: 'localStream', action: 'muted', value: false } }))
+		expect(stateChanged).not.toHaveBeenCalled()
+
+		client.handleMessage(json({ update: { streamID: 'localStream', action: 'muted', value: true } }))
+		expect(stateChanged).toHaveBeenCalledOnce()
+	})
+
+	it('only rebuilds definitions on a director update that changes the label', () => {
+		const client = makeClient()
+		withStreams(client, director)
+		const streamsChanged = vi.fn()
+		client.on('streamsChanged', streamsChanged)
+
+		client.handleMessage(json({ update: { streamID: 'directorStream', action: 'director', value: true } }))
+		expect(streamsChanged).not.toHaveBeenCalled()
+
+		client.handleMessage(json({ update: { streamID: 'directorStream', action: 'director', value: false } }))
+		expect(streamsChanged).toHaveBeenCalledOnce()
+		expect(client.streams).toEqual([{ id: 'directorStream', label: 'directorStream' }])
+	})
+
+	it('keeps streams in a store that stream IDs cannot reach the internals of', () => {
+		const client = makeClient()
+		client.handleMessage(json({ callback: { action: 'getDetails', result: { a: { streamID: '__proto__' } } } }))
+		expect(Object.getPrototypeOf(client.states)).toBeNull()
+		expect(client.streams).toEqual([])
+	})
+
+	it('drops device details and other fields it does not use', () => {
+		const client = makeClient()
+		client.handleMessage(
+			json({ callback: { action: 'getDetails', result: { s: { ...local, miscellaneous: { CPU: 'x' } } } } }),
+		)
+		expect(client.states.localStream).not.toHaveProperty('miscellaneous')
+	})
+
 	it('logs messages it ignores', () => {
 		const client = makeClient()
 		const log = vi.fn()
@@ -181,7 +232,7 @@ describe('VdoNinjaClient connection', () => {
 		client.connect()
 
 		await vi.waitFor(() => expect(fromClient).toContainEqual(expect.objectContaining({ action: 'getDetails' })))
-		expect(status).toHaveBeenCalledWith('ok')
+		expect(status).toHaveBeenCalledWith('ok', null)
 		client.destroy()
 	})
 
@@ -278,6 +329,32 @@ describe('VdoNinjaClient connection', () => {
 			client.destroy()
 		})
 
+		it('gathers getDetails requests made close together into one', async () => {
+			const client = await connected()
+			for (let i = 0; i < 5; i++) client.requestDetails()
+
+			await vi.waitFor(() => expect(fromClient).toHaveLength(2))
+			await new Promise((resolve) => setTimeout(resolve, 100))
+			expect(fromClient).toHaveLength(2)
+			client.destroy()
+		})
+
+		it('waits for the getDetails in flight before asking again', async () => {
+			const client = await connected()
+			client.requestDetails()
+			await vi.waitFor(() => expect(fromClient).toHaveLength(2))
+
+			client.requestDetails()
+			client.requestDetails()
+			await new Promise((resolve) => setTimeout(resolve, 100))
+			expect(fromClient).toHaveLength(2)
+
+			await reply(statesOf(local, guest))
+			await vi.waitFor(() => expect(fromClient).toHaveLength(3))
+			expect(fromClient.at(-1)).toMatchObject({ action: 'getDetails' })
+			client.destroy()
+		})
+
 		it('gives every request its own ID', async () => {
 			const client = await connected()
 			client.sendLocal('reload', {})
@@ -298,8 +375,122 @@ describe('VdoNinjaClient connection', () => {
 		})
 	})
 
-	it('does not send while disconnected', () => {
+	it('warns rather than sending while disconnected', () => {
 		const client = makeClient(relay.url)
-		expect(() => client.sendLocal('reload', {})).not.toThrow()
+		const log = vi.fn()
+		client.on('log', log)
+		client.sendLocal('reload', {})
+		expect(log).toHaveBeenCalledWith('warn', 'Not connected to VDO.Ninja, "reload" was not sent')
+	})
+
+	it('reports reconnecting after the relay drops it', async () => {
+		const client = makeClient(relay.url)
+		const status = vi.fn()
+		client.on('status', status)
+		client.connect()
+		await vi.waitFor(() => expect(status).toHaveBeenLastCalledWith('ok', null))
+
+		relay.disconnectAll()
+
+		await vi.waitFor(() => expect(status).toHaveBeenCalledWith('disconnected', 'Reconnecting'))
+		await vi.waitFor(() => expect(status).toHaveBeenLastCalledWith('ok', null))
+		client.destroy()
+	})
+
+	it('reports a server address it cannot use', () => {
+		const client = makeClient('wss://not a host:443')
+		const status = vi.fn()
+		client.on('status', status)
+		client.connect()
+		expect(status).toHaveBeenCalledWith('connection_failure', 'Invalid server address')
+		client.destroy()
+	})
+
+	describe('guest targets', () => {
+		it.each(['', '  ', 'null', ' NULL '])(
+			'refuses the target %j, which VDO.Ninja would treat as none',
+			async (target) => {
+				const client = makeClient(relay.url)
+				const log = vi.fn()
+				client.on('log', log)
+				client.connect()
+				await vi.waitFor(() => expect(fromClient).toHaveLength(1))
+
+				client.sendGuest('hangup', target, {})
+
+				expect(log).toHaveBeenCalledWith('warn', 'Not sending "hangup": no guest given')
+				await new Promise((resolve) => setTimeout(resolve, 50))
+				expect(fromClient).toHaveLength(1)
+				client.destroy()
+			},
+		)
+
+		it('sends a trimmed stream ID or a slot number', async () => {
+			const client = makeClient(relay.url)
+			client.connect()
+			await vi.waitFor(() => expect(fromClient).toHaveLength(1))
+
+			client.sendGuest('mic', ' guestStream ', {})
+			client.sendGuest('mic', 2, {})
+
+			await vi.waitFor(() => expect(fromClient).toHaveLength(3))
+			expect(fromClient.slice(1)).toMatchObject([{ target: 'guestStream' }, { target: 2 }])
+			client.destroy()
+		})
+	})
+})
+
+describe('VdoNinjaClient heartbeat and backoff', () => {
+	it('drops a connection that stops answering pings and reconnects', async () => {
+		const relay = await TestRelay.start(false)
+		const client = makeClient(relay.url, { heartbeatInterval: 50 })
+		const log = vi.fn()
+		client.on('log', log)
+		const connect = vi.spyOn(client, 'connect')
+		client.connect()
+
+		await vi.waitFor(() => expect(log).toHaveBeenCalledWith('warn', 'VDO.Ninja stopped responding, reconnecting'))
+		await vi.waitFor(() => expect(connect.mock.calls.length).toBeGreaterThan(1))
+		client.destroy()
+		await relay.stop()
+	})
+
+	it('keeps a connection that answers pings', async () => {
+		const relay = await TestRelay.start()
+		const client = makeClient(relay.url, { heartbeatInterval: 20 })
+		const log = vi.fn()
+		client.on('log', log)
+		client.connect()
+
+		await new Promise((resolve) => setTimeout(resolve, 200))
+		expect(log).not.toHaveBeenCalledWith('warn', expect.anything())
+		expect(relay.members('test-api')).toBe(1)
+		client.destroy()
+		await relay.stop()
+	})
+
+	it('backs off between failed attempts, up to the maximum', () => {
+		expect([0, 1, 2, 3, 4, 10].map((attempt) => reconnectDelay(attempt, 1000, 30_000))).toEqual([
+			1000, 2000, 4000, 8000, 16_000, 30_000,
+		])
+	})
+
+	it('resets the backoff once connected', async () => {
+		const relay = await TestRelay.start()
+		const client = makeClient(relay.url, { minReconnectDelay: 20, maxReconnectDelay: 10_000 })
+		let opened = 0
+		client.on('status', (status) => {
+			if (status === 'ok') opened++
+		})
+		client.connect()
+		await vi.waitFor(() => expect(opened).toBe(1))
+
+		// Several drops in a row would back off to seconds if each successful connection didn't reset it
+		for (let i = 2; i <= 5; i++) {
+			relay.disconnectAll()
+			await vi.waitFor(() => expect(opened).toBe(i), { timeout: 500 })
+		}
+		client.destroy()
+		await relay.stop()
 	})
 })

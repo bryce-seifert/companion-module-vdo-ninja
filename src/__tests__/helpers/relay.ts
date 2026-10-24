@@ -21,8 +21,9 @@ export class TestRelay {
 		})
 	}
 
-	static async start(): Promise<TestRelay> {
-		const server = new WebSocketServer({ host: '127.0.0.1', port: 0 })
+	/** With `autoPong` false the relay ignores pings, like a connection that has silently died */
+	static async start(autoPong = true): Promise<TestRelay> {
+		const server = new WebSocketServer({ host: '127.0.0.1', port: 0, autoPong })
 		await new Promise<void>((resolve) => server.once('listening', resolve))
 		return new TestRelay(server)
 	}

@@ -33,7 +33,14 @@ export class VdoNinjaHarness {
 		readonly relay: TestRelay,
 		readonly browser: Browser,
 	) {
-		this.client = new VdoNinjaClient({ url: relay.url, apiID: this.apiID, reconnectDelay: 100 })
+		this.client = new VdoNinjaClient({
+			url: relay.url,
+			apiID: this.apiID,
+			minReconnectDelay: 100,
+			maxReconnectDelay: 1000,
+			heartbeatInterval: 5000,
+			detailsDelay: 50,
+		})
 	}
 
 	static async start(): Promise<VdoNinjaHarness> {

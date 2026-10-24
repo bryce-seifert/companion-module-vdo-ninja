@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import { isDeepStrictEqual } from 'node:util'
 import WebSocket from 'ws'
 import type { JsonValue } from '@companion-module/base'
 import {
@@ -12,11 +13,11 @@ import {
 } from './api.js'
 import type { StreamChoice, StreamState } from './types.js'
 
-export type ClientStatus = 'connecting' | 'ok' | 'connection_failure'
+export type ClientStatus = 'connecting' | 'ok' | 'disconnected' | 'connection_failure'
 export type ClientLogLevel = 'debug' | 'info' | 'warn' | 'error'
 
 export type ClientEvents = {
-	status: [status: ClientStatus]
+	status: [status: ClientStatus, message: string | null]
 	log: [level: ClientLogLevel, message: string]
 	/** The set of streams changed, so anything defined per stream needs rebuilding */
 	streamsChanged: []
@@ -44,21 +45,43 @@ const PendingTimeout = 10_000
 export type ClientOptions = {
 	url: string
 	apiID: string
-	reconnectDelay: number
+	/** Delay before the first reconnect attempt, doubling on each failure up to maxReconnectDelay */
+	minReconnectDelay: number
+	maxReconnectDelay: number
+	/** How often to ping the server; a connection that misses a pong is dropped and reconnected */
+	heartbeatInterval: number
+	/** How long to gather getDetails requests into one */
+	detailsDelay: number
+}
+
+/** Delay before reconnect attempt `attempt` (0-based): doubling from min, capped at max */
+export function reconnectDelay(attempt: number, min: number, max: number): number {
+	return Math.min(max, min * 2 ** attempt)
+}
+
+/** A null-prototype record, so stream IDs can never reach object internals */
+function emptyStates(): Record<string, StreamState> {
+	return Object.create(null) as Record<string, StreamState>
 }
 
 /** Connection to the VDO.Ninja API relay, tracking the state of every stream it reports */
 export class VdoNinjaClient extends EventEmitter<ClientEvents> {
-	states: Record<string, StreamState> = {}
+	states: Record<string, StreamState> = emptyStates()
 	streams: StreamChoice[] = []
 
 	readonly #options: ClientOptions
 	#ws: WebSocket | undefined
 	#reconnectTimer: NodeJS.Timeout | undefined
-	#connected: boolean | null = null
+	#reconnectAttempts = 0
+	#heartbeatTimer: NodeJS.Timeout | undefined
+	#everOpened = false
+	#failed = false
 	#destroyed = false
 	#nextCid = 1
 	readonly #pending = new Map<number, PendingRequest>()
+	#detailsTimer: NodeJS.Timeout | undefined
+	#detailsInFlight: number | undefined
+	#detailsQueued = false
 
 	constructor(options: ClientOptions) {
 		super()
@@ -69,30 +92,43 @@ export class VdoNinjaClient extends EventEmitter<ClientEvents> {
 		clearTimeout(this.#reconnectTimer)
 		if (this.#destroyed) return
 
-		this.#ws?.close(1000)
+		this.#closeSocket()
 
-		const ws = new WebSocket(this.#options.url)
+		let ws: WebSocket
+		try {
+			ws = new WebSocket(this.#options.url)
+		} catch (error) {
+			this.emit('log', 'error', `Unable to connect to ${this.#options.url}: ${error}`)
+			this.emit('status', 'connection_failure', 'Invalid server address')
+			return
+		}
 		this.#ws = ws
+		let opened = false
 
 		ws.on('open', () => {
-			if (!this.#connected) {
-				this.emit('log', 'info', `Connection opened to VDO.Ninja`)
-				this.#connected = true
-			}
-			this.emit('status', 'ok')
+			opened = true
+			this.#reconnectAttempts = 0
+			// The hosted relay drops idle sockets, so routine reconnects are not logged
+			if (!this.#everOpened || this.#failed) this.emit('log', 'info', `Connection opened to VDO.Ninja`)
+			this.#everOpened = true
+			this.#failed = false
+			this.emit('status', 'ok', null)
+			this.#startHeartbeat(ws)
 
 			ws.send(JSON.stringify({ join: this.#options.apiID }))
-			this.sendLocal('getDetails', {})
+			this.#sendDetailsRequest()
 		})
 
 		ws.on('close', (code) => {
 			// A socket replaced by connect() or closed by destroy() must not schedule a reconnect
 			if (ws !== this.#ws || this.#destroyed) return
+			this.#stopHeartbeat()
+			this.#detailsInFlight = undefined
 			if (code !== 1000 && code !== 1006) {
-				this.#connected = false
 				this.emit('log', 'debug', `Websocket closed:  ${code}`)
 			}
-			this.#reconnectTimer = setTimeout(() => this.connect(), this.#options.reconnectDelay)
+			if (opened) this.emit('status', 'disconnected', 'Reconnecting')
+			this.#scheduleReconnect()
 		})
 
 		ws.on('message', (data: WebSocket.RawData) => {
@@ -101,9 +137,10 @@ export class VdoNinjaClient extends EventEmitter<ClientEvents> {
 		})
 
 		ws.on('error', (error: NodeJS.ErrnoException) => {
-			if (this.#connected !== false) {
-				this.#connected = false
-				this.emit('status', 'connection_failure')
+			// Only report the first failure of a run, not every reconnect attempt
+			if (!this.#failed) {
+				this.#failed = true
+				this.emit('status', 'connection_failure', null)
 				if (error?.code == 'ENOTFOUND') {
 					this.emit('log', 'error', `Unable to reach ${this.#options.url}`)
 				} else {
@@ -117,20 +154,28 @@ export class VdoNinjaClient extends EventEmitter<ClientEvents> {
 	destroy(): void {
 		this.#destroyed = true
 		clearTimeout(this.#reconnectTimer)
-		this.#ws?.close(1000)
-		this.#ws = undefined
+		clearTimeout(this.#detailsTimer)
+		this.#closeSocket()
 		for (const { timer } of this.#pending.values()) clearTimeout(timer)
 		this.#pending.clear()
-		this.states = {}
+		this.states = emptyStates()
 		this.streams = []
 	}
 
 	sendLocal<K extends keyof LocalCommands>(action: K, args: LocalCommands[K]): void {
+		if (!this.#checkConnected(action)) return
 		this.#send(action, null, args)
 	}
 
 	sendGuest<K extends keyof GuestCommands>(action: K, target: GuestTarget, args: GuestCommands[K]): void {
-		this.#send(action, target, args)
+		// VDO.Ninja treats an empty or "null" target as no target, which would run the command on this page
+		const text = String(target).trim()
+		if (text === '' || text.toLowerCase() === 'null' || (typeof target === 'number' && !Number.isFinite(target))) {
+			this.emit('log', 'warn', `Not sending "${action}": no guest given`)
+			return
+		}
+		if (!this.#checkConnected(action)) return
+		this.#send(action, typeof target === 'number' ? target : text, args)
 	}
 
 	/** Requests awaiting a callback, for tests */
@@ -138,24 +183,91 @@ export class VdoNinjaClient extends EventEmitter<ClientEvents> {
 		return this.#pending.size
 	}
 
-	#send(action: string, target: GuestTarget | null, args: { value?: JsonValue; value2?: JsonValue }): void {
-		if (this.#ws?.readyState !== WebSocket.OPEN) return
-
-		const cid = this.#nextCid++
-		const timer = setTimeout(() => this.#pending.delete(cid), PendingTimeout)
-		this.#pending.set(cid, { action, target, value: args.value, timer })
-		this.#ws.send(JSON.stringify(buildRequest(action, target, args, cid)))
+	#checkConnected(action: string): boolean {
+		if (this.#ws?.readyState === WebSocket.OPEN) return true
+		this.emit('log', 'warn', `Not connected to VDO.Ninja, "${action}" was not sent`)
+		return false
 	}
 
-	/** Callbacks are relayed to every controller on the API ID, so only our own requests are matched */
-	#takePending(cid: number | undefined): PendingRequest | undefined {
+	#send(action: string, target: GuestTarget | null, args: { value?: JsonValue; value2?: JsonValue }): number | null {
+		if (this.#ws?.readyState !== WebSocket.OPEN) return null
+
+		const cid = this.#nextCid++
+		const timer = setTimeout(() => this.#settle(cid), PendingTimeout)
+		this.#pending.set(cid, { action, target, value: args.value, timer })
+		this.#ws.send(JSON.stringify(buildRequest(action, target, args, cid)))
+		return cid
+	}
+
+	/** Forgets a request once it is answered or times out, returning it if it was ours */
+	#settle(cid: number | undefined): PendingRequest | undefined {
 		if (cid === undefined) return undefined
 		const request = this.#pending.get(cid)
-		if (request) {
-			clearTimeout(request.timer)
-			this.#pending.delete(cid)
+		if (!request) return undefined
+
+		clearTimeout(request.timer)
+		this.#pending.delete(cid)
+		if (cid === this.#detailsInFlight) {
+			this.#detailsInFlight = undefined
+			if (this.#detailsQueued) {
+				this.#detailsQueued = false
+				this.requestDetails()
+			}
 		}
 		return request
+	}
+
+	/** Asks for fresh details soon, gathering requests made close together into one */
+	requestDetails(): void {
+		if (this.#detailsTimer) return
+		if (this.#detailsInFlight !== undefined) {
+			this.#detailsQueued = true
+			return
+		}
+		this.#detailsTimer = setTimeout(() => this.#sendDetailsRequest(), this.#options.detailsDelay)
+	}
+
+	#sendDetailsRequest(): void {
+		clearTimeout(this.#detailsTimer)
+		this.#detailsTimer = undefined
+		this.#detailsInFlight = this.#send('getDetails', null, {}) ?? undefined
+	}
+
+	#scheduleReconnect(): void {
+		const delay = reconnectDelay(
+			this.#reconnectAttempts++,
+			this.#options.minReconnectDelay,
+			this.#options.maxReconnectDelay,
+		)
+		this.#reconnectTimer = setTimeout(() => this.connect(), delay)
+	}
+
+	#startHeartbeat(ws: WebSocket): void {
+		this.#stopHeartbeat()
+		let alive = true
+		ws.on('pong', () => (alive = true))
+		this.#heartbeatTimer = setInterval(() => {
+			if (!alive) {
+				this.emit('log', 'warn', 'VDO.Ninja stopped responding, reconnecting')
+				ws.terminate()
+				return
+			}
+			alive = false
+			ws.ping()
+		}, this.#options.heartbeatInterval)
+	}
+
+	#stopHeartbeat(): void {
+		clearInterval(this.#heartbeatTimer)
+		this.#heartbeatTimer = undefined
+	}
+
+	#closeSocket(): void {
+		const ws = this.#ws
+		this.#ws = undefined
+		this.#stopHeartbeat()
+		this.#detailsInFlight = undefined
+		if (ws && ws.readyState !== WebSocket.CLOSED) ws.close(1000)
 	}
 
 	#applyResult(request: PendingRequest, result: JsonValue): void {
@@ -164,10 +276,14 @@ export class VdoNinjaClient extends EventEmitter<ClientEvents> {
 		if (!(request.action in LocalStateResults)) return
 
 		const field = LocalStateResults[request.action as keyof typeof LocalStateResults]
+		let changed = false
 		for (const state of Object.values(this.states)) {
-			if (state.localStream) state[field] = result
+			if (state.localStream && state[field] !== result) {
+				state[field] = result
+				changed = true
+			}
 		}
-		this.emit('stateChanged')
+		if (changed) this.emit('stateChanged')
 	}
 
 	handleMessage(text: string): void {
@@ -175,14 +291,15 @@ export class VdoNinjaClient extends EventEmitter<ClientEvents> {
 		switch (message.type) {
 			case 'callback': {
 				const { action, cid, result } = message.callback
-				const request = this.#takePending(cid)
+				const request = this.#settle(cid)
 				if (action == 'getDetails') {
+					// Another controller's getDetails reply is just as current, so it is applied too
 					this.#applyDetails(result)
 				} else if (request?.target === null) {
 					this.#applyResult(request, result)
 				} else if (request) {
 					// VDO.Ninja doesn't push an update after every guest command (setslot, for one)
-					this.sendLocal('getDetails', {})
+					this.requestDetails()
 				}
 				break
 			}
@@ -201,17 +318,25 @@ export class VdoNinjaClient extends EventEmitter<ClientEvents> {
 		if (entries.length === 0) return false
 
 		let streamsChanged = false
+		let stateChanged = false
 		for (const details of entries) {
-			if (this.#storeDetails(details)) streamsChanged = true
+			const changes = this.#storeDetails(details)
+			streamsChanged ||= changes.streams
+			stateChanged ||= changes.state
 		}
 		if (streamsChanged) this.emit('streamsChanged')
-		this.emit('stateChanged')
+		if (stateChanged) this.emit('stateChanged')
 		return true
 	}
 
-	/** Returns whether the stream is new or its label changed, which is what per-stream definitions depend on */
-	#storeDetails(data: StreamState): boolean {
+	/**
+	 * Stores a stream's details. `streams` is true when the stream is new or its label changed, which
+	 * is what per-stream definitions depend on; `state` is true when anything about it changed.
+	 */
+	#storeDetails(data: StreamState): { streams: boolean; state: boolean } {
+		const state = !isDeepStrictEqual(this.states[data.streamID], data)
 		this.states[data.streamID] = data
+
 		let label = data.streamID
 		const name = data.label ? `(${data.label})` : ''
 
@@ -230,32 +355,36 @@ export class VdoNinjaClient extends EventEmitter<ClientEvents> {
 		const index = this.streams.findIndex((o) => o.id === data.streamID)
 		if (index === -1) {
 			this.streams.push({ id: data.streamID, label })
-			return true
+			return { streams: true, state }
 		}
-		if (this.streams[index].label === label) return false
+		if (this.streams[index].label === label) return { streams: false, state }
 		this.streams.splice(index, 1, { id: data.streamID, label })
-		return true
+		return { streams: true, state }
 	}
 
 	processUpdate(data: ApiUpdate): void {
 		if (data.action === 'details') {
-			if (!this.#applyDetails(data.value)) this.sendLocal('getDetails', {})
+			if (!this.#applyDetails(data.value)) this.requestDetails()
 			return
 		}
 
 		const state = data.streamID ? this.states[data.streamID] : undefined
 		if (state) {
+			const before = structuredClone(state)
 			switch (data.action) {
 				case 'hangup':
 					this.#removeStream(state.streamID)
-					break
-				case 'director':
-					state.director = data.value
-					this.emit('streamsChanged')
-					break
+					return
 				case 'endViewConnection':
 					this.#removeStream(data.value)
-					break
+					return
+				case 'director':
+					if (state.director !== data.value) {
+						const changes = this.#storeDetails({ ...state, director: data.value })
+						if (changes.streams) this.emit('streamsChanged')
+						this.emit('stateChanged')
+					}
+					return
 				case 'directorMuted':
 					state.others = { ...state.others, 'mute-guest': data.value ? '1' : '0' }
 					break
@@ -275,20 +404,22 @@ export class VdoNinjaClient extends EventEmitter<ClientEvents> {
 					break
 				case 'positionChange':
 				case 'newViewConnection':
-					this.sendLocal('getDetails', {})
+					this.requestDetails()
 					break
 			}
-			this.emit('stateChanged')
+			if (!isDeepStrictEqual(before, state)) this.emit('stateChanged')
 		}
 		if (data.action === 'seeding' || (data.action === 'tracksAdded' && data.value)) {
-			this.sendLocal('getDetails', {})
+			this.requestDetails()
 		}
 	}
 
 	#removeStream(streamID: string): void {
+		if (!(streamID in this.states)) return
 		delete this.states[streamID]
 		const index = this.streams.findIndex((o) => o.id === streamID)
 		if (index !== -1) this.streams.splice(index, 1)
 		this.emit('streamsChanged')
+		this.emit('stateChanged')
 	}
 }

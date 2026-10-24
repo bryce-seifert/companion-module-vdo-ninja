@@ -203,6 +203,33 @@ export type ApiMessage =
 	| { type: 'callback'; callback: ApiCallback }
 	| { type: 'ignored'; reason: string }
 
+/**
+ * VDO.Ninja stream IDs are word characters. Anything else, including IDs that would collide with
+ * object internals, is rejected before it can reach the module's state or variable names.
+ */
+const StreamIDPattern = /^[\w-]{1,128}$/
+
+export function isValidStreamID(value: unknown): value is string {
+	return typeof value === 'string' && StreamIDPattern.test(value) && value !== '__proto__'
+}
+
+/** The getDetails fields the module reads; everything else (device info, buffers, stats) is dropped */
+const DetailsFields = [
+	'streamID',
+	'label',
+	'director',
+	'position',
+	'localStream',
+	'muted',
+	'videoMuted',
+	'speakerMuted',
+	'others',
+	'scenes',
+	'featured',
+	'slot',
+	'group',
+] as const satisfies readonly (keyof StreamState)[]
+
 function isObject(value: unknown): value is JsonObject {
 	return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -213,16 +240,19 @@ function includes<T extends string>(list: readonly T[], value: string): value is
 
 function parseUpdate(raw: unknown): ApiUpdate | string {
 	if (!isObject(raw) || typeof raw.action !== 'string') return 'malformed update'
-	const streamID = typeof raw.streamID === 'string' ? raw.streamID : null
+	if (raw.streamID !== undefined && raw.streamID !== null && !isValidStreamID(raw.streamID)) {
+		return 'invalid stream ID'
+	}
+	const streamID = raw.streamID ?? null
 	const { action, value } = raw
 
 	if (includes(BooleanUpdateActions, action)) {
 		return typeof value === 'boolean' ? { streamID, action, value } : `non-boolean value for ${action}`
 	}
 	if (action === 'endViewConnection') {
-		return typeof value === 'string'
+		return isValidStreamID(value)
 			? { streamID, action: 'endViewConnection', value }
-			: 'non-string value for endViewConnection'
+			: 'invalid stream ID for endViewConnection'
 	}
 	if (includes(RefreshUpdateActions, action)) {
 		return { streamID, action, value: value ?? null }
@@ -259,10 +289,18 @@ export function parseMessage(text: string): ApiMessage {
 	return { type: 'ignored', reason: 'unknown message' }
 }
 
-/** getDetails returns one entry per stream; entries without a stream ID are dropped */
+/** getDetails returns one entry per stream; entries without a valid stream ID are dropped */
 export function parseDetails(result: JsonValue): StreamState[] {
 	if (!isObject(result) && !Array.isArray(result)) return []
-	return Object.values(result).filter(
-		(entry): entry is StreamState => isObject(entry) && typeof entry.streamID === 'string',
-	)
+
+	const streams: StreamState[] = []
+	for (const entry of Object.values(result)) {
+		if (!isObject(entry) || !isValidStreamID(entry.streamID)) continue
+		const picked: Partial<Record<(typeof DetailsFields)[number], unknown>> = {}
+		for (const field of DetailsFields) {
+			if (field in entry) picked[field] = entry[field]
+		}
+		streams.push(picked as StreamState)
+	}
+	return streams
 }
