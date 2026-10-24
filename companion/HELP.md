@@ -69,6 +69,11 @@ The **Guest** field takes the guest's slot number (1, 2, …) or stream ID, and 
 - Camera Status
 - Speaker Status
 - Guest in Scene
+- Guest Hand Raised
+- Guest Queued (waiting for the director to admit them)
+- Stream Highlighted
+- Guest in Group
+- Guest in Slot (needs slots in use: `&slotmode=1` on the director, or the mixer)
 
 The status feedbacks are active when the stream's state matches the **Muted** checkbox. A guest muted or hidden by the director counts as muted.
 
@@ -80,3 +85,13 @@ The status feedbacks are active when the stream's state matches the **Muted** ch
 - speaker (Available for the "Director" role only)
 - label (If specified, otherwise it will be the guest position number)
 - scenes (List of scenes a guest is currently active in)
+
+For guests, as seen from the director:
+
+- hand (Raised or Lowered)
+- queued (Queued or Admitted)
+- highlighted (Highlighted or Not highlighted)
+- slot (Mixer slot number, or None)
+- groups (List of groups the guest is in)
+
+Each variable is available by guest position (`guest_1_hand`) and by stream ID (`yourStreamID_hand`).

@@ -22,6 +22,16 @@ describe('variables', () => {
 			'guestStream_camera',
 			'guestStream_label',
 			'guestStream_scenes',
+			'guest_2_hand',
+			'guestStream_hand',
+			'guest_2_queued',
+			'guestStream_queued',
+			'guest_2_highlighted',
+			'guestStream_highlighted',
+			'guest_2_slot',
+			'guestStream_slot',
+			'guest_2_groups',
+			'guestStream_groups',
 		])
 	})
 
@@ -43,7 +53,42 @@ describe('variables', () => {
 			guestStream_camera: 'Muted',
 			guestStream_label: 'Alice',
 			guestStream_scenes: ['1', '3'],
+			guest_2_hand: 'Lowered',
+			guestStream_hand: 'Lowered',
+			guest_2_queued: 'Admitted',
+			guestStream_queued: 'Admitted',
+			guest_2_highlighted: 'Not highlighted',
+			guestStream_highlighted: 'Not highlighted',
+			guest_2_slot: 'None',
+			guestStream_slot: 'None',
+			guest_2_groups: 'None',
+			guestStream_groups: 'None',
 		})
+	})
+
+	it('reports the director view of a guest', () => {
+		const values = GetVariableValues(
+			statesOf({
+				...guest,
+				featured: true,
+				slot: 3,
+				group: ['2', '5'],
+				others: { 'hand-raised': true, 'remove-queue': true },
+			}),
+		)
+		expect(values).toMatchObject({
+			guest_2_hand: 'Raised',
+			guest_2_queued: 'Queued',
+			guest_2_highlighted: 'Highlighted',
+			guest_2_slot: 3,
+			guest_2_groups: ['2', '5'],
+			guestStream_hand: 'Raised',
+			guestStream_slot: 3,
+		})
+	})
+
+	it('reports no slot when slots are not in use', () => {
+		expect(GetVariableValues(statesOf({ ...guest, slot: false })).guest_2_slot).toBe('None')
 	})
 
 	it('shows a guest muted by the director as muted', () => {

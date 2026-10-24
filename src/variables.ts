@@ -1,5 +1,29 @@
 import type { CompanionVariableDefinitions, CompanionVariableValue } from '@companion-module/base'
+import { isHandRaised, isHighlighted, isQueued, slotOf } from './state.js'
 import type { StreamState } from './types.js'
+
+/** Director-view state of a guest, defined under both its slot and its stream ID */
+const GuestStateVariables = {
+	hand: 'Hand',
+	queued: 'Queued',
+	highlighted: 'Highlighted',
+	slot: 'Slot',
+	groups: 'Groups',
+} as const
+
+function isGuest(data: StreamState): boolean {
+	return !data.director && !!data.position
+}
+
+function guestStateValues(data: StreamState): Record<keyof typeof GuestStateVariables, CompanionVariableValue> {
+	return {
+		hand: isHandRaised(data) ? 'Raised' : 'Lowered',
+		queued: isQueued(data) ? 'Queued' : 'Admitted',
+		highlighted: isHighlighted(data) ? 'Highlighted' : 'Not highlighted',
+		slot: slotOf(data) ?? 'None',
+		groups: data.group?.length ? data.group : 'None',
+	}
+}
 
 export type VariablesSchema = Record<string, CompanionVariableValue>
 
@@ -27,6 +51,13 @@ export function GetVariableDefinitions(
 			variables[`${data.streamID}_camera`] = { name: `Stream ID: ${data.streamID} - Camera` }
 			variables[`${data.streamID}_label`] = { name: `Stream ID: ${data.streamID} - Label` }
 			variables[`${data.streamID}_scenes`] = { name: `Stream ID: ${data.streamID} - Scenes` }
+
+			if (isGuest(data)) {
+				for (const [key, label] of Object.entries(GuestStateVariables)) {
+					variables[`guest_${data.position}_${key}`] = { name: `Guest ${data.position} - ${label}` }
+					variables[`${data.streamID}_${key}`] = { name: `Stream ID: ${data.streamID} - ${label}` }
+				}
+			}
 		}
 	}
 
@@ -72,6 +103,13 @@ export function GetVariableValues(states: Record<string, StreamState>): Variable
 				[`${data.streamID}_label`]: label,
 				[`${data.streamID}_scenes`]: sceneList.length ? sceneList : 'None',
 			})
+
+			if (isGuest(data)) {
+				for (const [key, value] of Object.entries(guestStateValues(data))) {
+					values[`guest_${data.position}_${key}`] = value
+					values[`${data.streamID}_${key}`] = value
+				}
+			}
 		}
 	}
 	return values

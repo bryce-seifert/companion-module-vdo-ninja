@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { parseDetails } from '../api.js'
 import { GetFeedbacks, type FeedbacksSchema } from '../feedbacks.js'
 import type { StreamChoice, StreamState } from '../types.js'
+import getDetailsDirector from './fixtures/getDetails-director.json' with { type: 'json' }
 import { checkFeedback, definition } from './helpers/definitions.js'
 import { director, guest, local, statesOf } from './helpers/streams.js'
 
@@ -68,5 +70,59 @@ describe('feedbacks', () => {
 	])('guestScene checks scene %s', (scene, expected) => {
 		const { check } = setup(statesOf(guest))
 		expect(check('guestScene', { stream: 'guestStream', scene })).toBe(expected)
+	})
+
+	describe('director view of a guest', () => {
+		const viewed = {
+			...guest,
+			featured: true,
+			slot: 3,
+			group: ['2'],
+			others: { 'hand-raised': true, 'remove-queue': true },
+		}
+
+		it.each([
+			['handRaised', {}],
+			['guestQueued', {}],
+			['highlighted', {}],
+			['guestGroup', { group: 2 }],
+			['guestSlot', { slot: 3 }],
+		] as const)('%s is true when the guest state matches', (id, options) => {
+			const { check } = setup(statesOf(viewed))
+			expect(check(id, { stream: 'guestStream', ...options })).toBe(true)
+		})
+
+		it.each([
+			['handRaised', {}],
+			['guestQueued', {}],
+			['highlighted', {}],
+			['guestGroup', { group: 2 }],
+			['guestSlot', { slot: 3 }],
+		] as const)('%s is false for a guest without that state', (id, options) => {
+			const { check } = setup(statesOf(guest))
+			expect(check(id, { stream: 'guestStream', ...options })).toBe(false)
+		})
+
+		it.each([
+			['handRaised', {}],
+			['guestGroup', { group: 2 }],
+			['guestSlot', { slot: 3 }],
+		] as const)('%s is false for an unknown stream', (id, options) => {
+			const { check } = setup(statesOf(viewed))
+			expect(check(id, { stream: 'nobody', ...options })).toBe(false)
+		})
+
+		it('checks the selected group and slot', () => {
+			const { check } = setup(statesOf(viewed))
+			expect(check('guestGroup', { stream: 'guestStream', group: 5 })).toBe(false)
+			expect(check('guestSlot', { stream: 'guestStream', slot: 1 })).toBe(false)
+		})
+
+		it('reads the real director reply', () => {
+			const { check } = setup(statesOf(...parseDetails(getDetailsDirector.callback.result)))
+			expect(check('handRaised', { stream: 'guestone' })).toBe(false)
+			expect(check('guestQueued', { stream: 'guestone' })).toBe(false)
+			expect(check('highlighted', { stream: 'guestone' })).toBe(false)
+		})
 	})
 })

@@ -5,6 +5,7 @@ import {
 	type CompanionInputFieldDropdown,
 } from '@companion-module/base'
 import type { VdoNinjaClient } from './client.js'
+import { isHandRaised, isHighlighted, isInGroup, isQueued, slotOf } from './state.js'
 
 type StreamStateOptions = {
 	stream: string
@@ -16,6 +17,11 @@ export type FeedbacksSchema = {
 	camera: { type: 'boolean'; options: StreamStateOptions }
 	speaker: { type: 'boolean'; options: StreamStateOptions }
 	guestScene: { type: 'boolean'; options: { stream: string; scene: string } }
+	handRaised: { type: 'boolean'; options: { stream: string } }
+	guestQueued: { type: 'boolean'; options: { stream: string } }
+	highlighted: { type: 'boolean'; options: { stream: string } }
+	guestGroup: { type: 'boolean'; options: { stream: string; group: number } }
+	guestSlot: { type: 'boolean'; options: { stream: string; slot: number } }
 }
 
 // Stored as a boolean, matching the true/false ids of the dropdown this replaced
@@ -110,6 +116,97 @@ export function GetFeedbacks(
 			},
 			callback: (feedback) => {
 				return client.states[feedback.options.stream]?.scenes?.[feedback.options.scene] == true
+			},
+		},
+		handRaised: {
+			type: 'boolean',
+			name: 'Guest Hand Raised',
+			description: 'If the guest has raised their hand, change the style of the button',
+			options: [streamField(true)],
+			defaultStyle: {
+				color: ColorWhite,
+				bgcolor: ColorGreen,
+			},
+			callback: (feedback) => {
+				const stream = client.states[feedback.options.stream]
+				return stream ? isHandRaised(stream) : false
+			},
+		},
+		guestQueued: {
+			type: 'boolean',
+			name: 'Guest Queued',
+			description: 'If the guest is waiting in the queue to be admitted, change the style of the button',
+			options: [streamField(true)],
+			defaultStyle: {
+				color: ColorWhite,
+				bgcolor: ColorGreen,
+			},
+			callback: (feedback) => {
+				const stream = client.states[feedback.options.stream]
+				return stream ? isQueued(stream) : false
+			},
+		},
+		highlighted: {
+			type: 'boolean',
+			name: 'Stream Highlighted',
+			description: 'If the stream is highlighted for everyone, change the style of the button',
+			options: [streamField(true)],
+			defaultStyle: {
+				color: ColorWhite,
+				bgcolor: ColorGreen,
+			},
+			callback: (feedback) => {
+				const stream = client.states[feedback.options.stream]
+				return stream ? isHighlighted(stream) : false
+			},
+		},
+		guestGroup: {
+			type: 'boolean',
+			name: 'Guest in Group',
+			description: 'If the guest is in the selected group, change the style of the button',
+			options: [
+				streamField(true),
+				{
+					type: 'number',
+					label: 'Group ID (1 to 8)',
+					id: 'group',
+					default: 1,
+					min: 1,
+					max: 8,
+				},
+			],
+			defaultStyle: {
+				color: ColorWhite,
+				bgcolor: ColorGreen,
+			},
+			callback: (feedback) => {
+				const stream = client.states[feedback.options.stream]
+				return stream ? isInGroup(stream, feedback.options.group) : false
+			},
+		},
+		guestSlot: {
+			type: 'boolean',
+			name: 'Guest in Slot',
+			description:
+				'If the guest is assigned to the selected mixer slot, change the style of the button. Needs slots in use (&slotmode on the director, or the mixer)',
+			options: [
+				streamField(true),
+				{
+					type: 'number',
+					label: 'Slot',
+					id: 'slot',
+					default: 1,
+					min: 1,
+					max: 99,
+				},
+			],
+			defaultStyle: {
+				color: ColorWhite,
+				bgcolor: ColorGreen,
+			},
+			callback: (feedback) => {
+				const stream = client.states[feedback.options.stream]
+				return stream ? slotOf(stream) === feedback.options.slot : false
 			},
 		},
 	}
