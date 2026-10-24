@@ -15,38 +15,38 @@ function setup() {
 
 describe('actions', () => {
 	it.each([
-		['speaker', { value: 'false' }, 'speaker', { value: 'false' }, true],
-		['mic', { value: 'toggle' }, 'mic', { value: 'toggle' }, true],
-		['camera', { value: 'true' }, 'camera', { value: 'true' }, true],
-		['volume', { value: 40 }, 'volume', { value: 40 }, false],
-		['sendChat', { value: 'hello' }, 'sendChat', { value: 'hello' }, false],
-		['record', { value: 'false' }, 'record', { value: 'false' }, false],
-		['reload', {}, 'reload', {}, false],
-		['hangup', {}, 'hangup', {}, false],
-		['bitrate', { value: 'true', bitrate: 900 }, 'bitrate', { value: 'true' }, false],
-		['bitrate', { value: 'custom', bitrate: 900 }, 'bitrate', { value: 900 }, false],
-		['panning', { value: 45 }, 'panning', { value: 45 }, false],
-		['togglehand', {}, 'togglehand', {}, false],
-		['togglescreenshare', {}, 'togglescreenshare', {}, false],
-		['forceKeyframe', {}, 'forceKeyframe', {}, false],
-		['nextSlide', {}, 'nextSlide', {}, false],
-		['previousSlide', {}, 'prevSlide', {}, false],
-		['ptzPan', { value: -50 }, 'pan', { value: -0.5 }, false],
-		['ptzTilt', { value: 25 }, 'tilt', { value: 0.25 }, false],
-		['ptzZoom', { value: 10 }, 'zoom', { value: 0.1 }, false],
-		['ptzFocus', { value: -10 }, 'focus', { value: -0.1 }, false],
-		['ptzExposure', { value: 75 }, 'exposure', { value: 0.75 }, false],
-		['group', { value: 3 }, 'group', { value: 3 }, false],
-		['joinGroup', { value: 3 }, 'joinGroup', { value: 3 }, false],
-		['leaveGroup', { value: 3 }, 'leaveGroup', { value: 3 }, false],
-		['viewGroup', { value: 3 }, 'viewGroup', { value: 3 }, false],
-		['joinViewGroup', { value: 3 }, 'joinViewGroup', { value: 3 }, false],
-		['leaveViewGroup', { value: 3 }, 'leaveViewGroup', { value: 3 }, false],
-		['soloVideo', {}, 'soloVideo', {}, false],
-	] as const)('%s sends the local %s command', async (id, options, command, args, local) => {
+		['speaker', { value: 'false' }, 'speaker', { value: 'false' }],
+		['mic', { value: 'toggle' }, 'mic', { value: 'toggle' }],
+		['camera', { value: 'true' }, 'camera', { value: 'true' }],
+		['volume', { value: 40 }, 'volume', { value: 40 }],
+		['sendChat', { value: 'hello' }, 'sendChat', { value: 'hello' }],
+		['record', { value: 'false' }, 'record', { value: 'false' }],
+		['reload', {}, 'reload', {}],
+		['hangup', {}, 'hangup', {}],
+		['bitrate', { value: 'true', bitrate: 900 }, 'bitrate', { value: 'true' }],
+		['bitrate', { value: 'custom', bitrate: 900 }, 'bitrate', { value: 900 }],
+		['panning', { value: 45 }, 'panning', { value: 45 }],
+		['togglehand', {}, 'togglehand', {}],
+		['togglescreenshare', {}, 'togglescreenshare', {}],
+		['forceKeyframe', {}, 'forceKeyframe', {}],
+		['nextSlide', {}, 'nextSlide', {}],
+		['previousSlide', {}, 'prevSlide', {}],
+		['ptzPan', { value: -50 }, 'pan', { value: -0.5 }],
+		['ptzTilt', { value: 25 }, 'tilt', { value: 0.25 }],
+		['ptzZoom', { value: 10 }, 'zoom', { value: 0.1 }],
+		['ptzFocus', { value: -10 }, 'focus', { value: -0.1 }],
+		['ptzExposure', { value: 75 }, 'exposure', { value: 0.75 }],
+		['group', { value: 3 }, 'group', { value: 3 }],
+		['joinGroup', { value: 3 }, 'joinGroup', { value: 3 }],
+		['leaveGroup', { value: 3 }, 'leaveGroup', { value: 3 }],
+		['viewGroup', { value: 3 }, 'viewGroup', { value: 3 }],
+		['joinViewGroup', { value: 3 }, 'joinViewGroup', { value: 3 }],
+		['leaveViewGroup', { value: 3 }, 'leaveViewGroup', { value: 3 }],
+		['soloVideo', {}, 'soloVideo', {}],
+	] as const)('%s sends the local %s command', async (id, options, command, args) => {
 		const { sender, run } = setup()
 		await run(id, options as never)
-		expect(sender.sendLocal).toHaveBeenCalledExactlyOnceWith(command, args, ...(local ? [true] : []))
+		expect(sender.sendLocal).toHaveBeenCalledExactlyOnceWith(command, args)
 		expect(sender.sendGuest).not.toHaveBeenCalled()
 	})
 

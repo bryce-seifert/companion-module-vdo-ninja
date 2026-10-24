@@ -144,21 +144,21 @@ export type ApiRequest = {
 	target: GuestTarget
 	value: JsonValue
 	value2?: JsonValue
-	/** Not part of the API: echoed back in the callback, so the module can tell its local commands apart */
-	local: boolean
+	/** Request ID. Not part of the API, but VDO.Ninja echoes every request field back in its callback */
+	cid: number
 }
 
 export function buildRequest(
 	action: string,
 	target: GuestTarget | null,
 	args: { value?: JsonValue; value2?: JsonValue },
-	local: boolean,
+	cid: number,
 ): ApiRequest {
 	const request: ApiRequest = {
 		action,
 		target: target ?? 'null',
 		value: args.value ?? 'null',
-		local,
+		cid,
 	}
 	if (args.value2 !== undefined) request.value2 = args.value2
 	return request
@@ -174,14 +174,11 @@ const BooleanUpdateActions = [
 	'directorMuted',
 	'directorVideoHide',
 	'remoteVideoMuted',
-	// Not sent by current VDO.Ninja releases, kept for older ones and for local command callbacks
-	'mic',
-	'camera',
-	'speaker',
+	// Not sent by current VDO.Ninja releases, but handled by earlier versions of this module
 	'remoteMuted',
 ] as const
 
-/** Updates that only signal that a fresh getDetails is needed */
+/** Updates that signal that a fresh getDetails is needed; `details` usually carries the new details itself */
 const RefreshUpdateActions = ['details', 'positionChange', 'newViewConnection', 'seeding', 'tracksAdded'] as const
 
 export type BooleanUpdateAction = (typeof BooleanUpdateActions)[number]
@@ -197,8 +194,7 @@ export type ApiUpdate =
 /** A command response: the original request echoed back with its result */
 export type ApiCallback = {
 	action: string
-	value?: JsonValue
-	local?: boolean
+	cid?: number
 	result: JsonValue
 }
 
@@ -238,8 +234,7 @@ function parseCallback(raw: unknown): ApiCallback | string {
 	if (!isObject(raw) || typeof raw.action !== 'string') return 'malformed callback'
 	return {
 		action: raw.action,
-		value: raw.value,
-		local: raw.local === true,
+		cid: typeof raw.cid === 'number' ? raw.cid : undefined,
 		result: raw.result ?? null,
 	}
 }

@@ -6,26 +6,26 @@ const json = (value: unknown) => JSON.stringify(value)
 
 describe('buildRequest', () => {
 	it('sends a local command with "null" placeholders', () => {
-		expect(buildRequest('reload', null, {}, false)).toEqual({
+		expect(buildRequest('reload', null, {}, 1)).toEqual({
 			action: 'reload',
 			target: 'null',
 			value: 'null',
-			local: false,
+			cid: 1,
 		})
 	})
 
-	it('includes the target, value and local flag', () => {
-		expect(buildRequest('volume', 3, { value: 150 }, true)).toEqual({
+	it('includes the target, value and request ID', () => {
+		expect(buildRequest('volume', 3, { value: 150 }, 7)).toEqual({
 			action: 'volume',
 			target: 3,
 			value: 150,
-			local: true,
+			cid: 7,
 		})
 	})
 
 	it('only includes value2 when given', () => {
-		expect(buildRequest('zoom', null, { value: 0.5 }, false)).not.toHaveProperty('value2')
-		expect(buildRequest('zoom', null, { value: 0.5, value2: 'abs' }, false)).toHaveProperty('value2', 'abs')
+		expect(buildRequest('zoom', null, { value: 0.5 }, 1)).not.toHaveProperty('value2')
+		expect(buildRequest('zoom', null, { value: 0.5, value2: 'abs' }, 1)).toHaveProperty('value2', 'abs')
 	})
 })
 
@@ -70,12 +70,19 @@ describe('parseMessage', () => {
 		})
 	})
 
-	it('parses callbacks', () => {
+	it('parses callbacks with their request ID', () => {
 		expect(
-			parseMessage(json({ callback: { action: 'mic', target: 'null', value: false, local: true, result: true } })),
+			parseMessage(json({ callback: { action: 'mic', target: 'null', value: false, cid: 4, result: true } })),
 		).toEqual({
 			type: 'callback',
-			callback: { action: 'mic', value: false, local: true, result: true },
+			callback: { action: 'mic', cid: 4, result: true },
+		})
+	})
+
+	it('parses callbacks without a request ID', () => {
+		expect(parseMessage(json({ callback: { action: 'getDetails', result: {} } }))).toEqual({
+			type: 'callback',
+			callback: { action: 'getDetails', cid: undefined, result: {} },
 		})
 	})
 

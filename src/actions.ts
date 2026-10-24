@@ -76,7 +76,7 @@ export function GetActions(
 				},
 			],
 			callback: (action) => {
-				client.sendLocal('speaker', { value: action.options.value }, true)
+				client.sendLocal('speaker', { value: action.options.value })
 			},
 		},
 
@@ -93,7 +93,7 @@ export function GetActions(
 				},
 			],
 			callback: (action) => {
-				client.sendLocal('mic', { value: action.options.value }, true)
+				client.sendLocal('mic', { value: action.options.value })
 			},
 		},
 
@@ -110,7 +110,7 @@ export function GetActions(
 				},
 			],
 			callback: (action) => {
-				client.sendLocal('camera', { value: action.options.value }, true)
+				client.sendLocal('camera', { value: action.options.value })
 			},
 		},
 

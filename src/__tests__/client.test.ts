@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import WebSocket from 'ws'
 import { VdoNinjaClient } from '../client.js'
+import getDetailsDirector from './fixtures/getDetails-director.json' with { type: 'json' }
 import getDetailsPush from './fixtures/getDetails-push.json' with { type: 'json' }
+import updateDetailsDirector from './fixtures/update-details-director.json' with { type: 'json' }
 import { TestRelay } from './helpers/relay.js'
 import { director, guest, local, statesOf } from './helpers/streams.js'
 
@@ -25,7 +27,39 @@ describe('VdoNinjaClient state', () => {
 
 		expect(Object.keys(client.states)).toEqual(['fixturestream'])
 		expect(client.streams).toEqual([{ id: 'fixturestream', label: 'Fixture (Local)' }])
-		expect(streamsChanged).toHaveBeenCalled()
+		expect(streamsChanged).toHaveBeenCalledOnce()
+	})
+
+	it('loads the director and guests from a real director getDetails reply', () => {
+		const client = makeClient()
+		client.handleMessage(json(getDetailsDirector))
+		expect(client.streams).toEqual([
+			{ id: 'guestone', label: 'Guest 1 (Alice)' },
+			{ id: 'directorstream', label: 'Director (Local)' },
+		])
+		expect(client.states.guestone.others).toMatchObject({ 'mute-guest': '1', 'hand-raised': false })
+	})
+
+	it('only reports a stream change when a stream is added or relabelled', () => {
+		const client = makeClient()
+		const streamsChanged = vi.fn()
+		const stateChanged = vi.fn()
+		client.on('streamsChanged', streamsChanged)
+		client.on('stateChanged', stateChanged)
+
+		withStreams(client, guest)
+		withStreams(client, { ...guest, muted: true })
+		expect(streamsChanged).toHaveBeenCalledOnce()
+		expect(stateChanged).toHaveBeenCalledTimes(2)
+
+		withStreams(client, { ...guest, position: 3 })
+		expect(streamsChanged).toHaveBeenCalledTimes(2)
+	})
+
+	it('applies the details carried by a details update', () => {
+		const client = makeClient()
+		client.handleMessage(json(updateDetailsDirector))
+		expect(client.streams).toEqual([{ id: 'guestone', label: 'Guest 1 (Alice)' }])
 	})
 
 	it('labels the director, guests and local stream', () => {
@@ -47,13 +81,10 @@ describe('VdoNinjaClient state', () => {
 
 	it.each([
 		['muted', 'muted'],
-		['mic', 'muted'],
 		['remoteMuted', 'muted'],
 		['videoMuted', 'videoMuted'],
-		['camera', 'videoMuted'],
 		['remoteVideoMuted', 'videoMuted'],
 		['speakerMuted', 'speakerMuted'],
-		['speaker', 'speakerMuted'],
 	] as const)('applies a %s update to %s', (action, field) => {
 		const client = makeClient()
 		withStreams(client, local)
@@ -107,25 +138,10 @@ describe('VdoNinjaClient state', () => {
 		expect(stateChanged).not.toHaveBeenCalled()
 	})
 
-	it('applies the result of a local mute command to the local stream', () => {
-		const client = makeClient()
-		withStreams(client, local, guest)
-		client.handleMessage(json({ callback: { action: 'mic', value: false, local: true, result: true } }))
-		expect(client.states.localStream.muted).toBe(true)
-		expect(client.states.guestStream.muted).toBe(false)
-	})
-
-	it('applies the result of a local speaker command to the local stream', () => {
+	it('ignores command results without a request of its own', () => {
 		const client = makeClient()
 		withStreams(client, local)
-		client.handleMessage(json({ callback: { action: 'speaker', value: false, local: true, result: true } }))
-		expect(client.states.localStream.speakerMuted).toBe(true)
-	})
-
-	it('waits for the update after a local toggle rather than using its result', () => {
-		const client = makeClient()
-		withStreams(client, local)
-		client.handleMessage(json({ callback: { action: 'mic', value: 'toggle', local: true, result: true } }))
+		client.handleMessage(json({ callback: { action: 'mic', cid: 1, value: false, result: true } }))
 		expect(client.states.localStream.muted).toBe(false)
 	})
 
@@ -203,6 +219,83 @@ describe('VdoNinjaClient connection', () => {
 		await vi.waitFor(() => expect(relay.members('test-api')).toBe(1))
 		await new Promise((resolve) => setTimeout(resolve, 200))
 		expect(relay.members('test-api')).toBe(1)
+	})
+
+	describe('command results', () => {
+		type Request = { action: string; cid: number }
+
+		async function connected() {
+			const client = makeClient(relay.url)
+			client.connect()
+			await vi.waitFor(() => expect(fromClient).toHaveLength(1))
+			// Answer the initial getDetails with a local stream and a guest
+			const getDetails = fromClient[0] as Request
+			page.send(json({ callback: { ...getDetails, result: statesOf(local, guest) } }))
+			await vi.waitFor(() => expect(client.streams).toHaveLength(2))
+			return client
+		}
+
+		/** Replies to the latest request, as VDO.Ninja does: the request echoed back with its result */
+		async function reply(result: unknown) {
+			await vi.waitFor(() => expect(fromClient.length).toBeGreaterThan(1))
+			const request = fromClient.at(-1) as Request
+			page.send(json({ callback: { ...request, result } }))
+			return request
+		}
+
+		it.each([
+			['mic', 'muted'],
+			['camera', 'videoMuted'],
+			['speaker', 'speakerMuted'],
+		] as const)('applies the result of a local %s command to the local stream', async (action, field) => {
+			const client = await connected()
+			client.sendLocal(action, { value: false })
+			await reply(true)
+
+			await vi.waitFor(() => expect(client.states.localStream[field]).toBe(true))
+			expect(client.states.guestStream[field]).toBe(guest[field])
+			expect(client.pendingRequests).toBe(0)
+			client.destroy()
+		})
+
+		it('waits for the update after a local toggle rather than using its result', async () => {
+			const client = await connected()
+			client.sendLocal('mic', { value: 'toggle' })
+			await reply(true)
+
+			await vi.waitFor(() => expect(client.pendingRequests).toBe(0))
+			expect(client.states.localStream.muted).toBe(false)
+			client.destroy()
+		})
+
+		it('does not apply the result of a guest command to the local stream', async () => {
+			const client = await connected()
+			client.sendGuest('mic', 2, {})
+			await reply(true)
+
+			await vi.waitFor(() => expect(client.pendingRequests).toBe(0))
+			expect(client.states.localStream.muted).toBe(false)
+			client.destroy()
+		})
+
+		it('gives every request its own ID', async () => {
+			const client = await connected()
+			client.sendLocal('reload', {})
+			client.sendLocal('reload', {})
+			await vi.waitFor(() => expect(fromClient).toHaveLength(3))
+			const ids = (fromClient as Request[]).map((request) => request.cid)
+			expect(new Set(ids).size).toBe(3)
+			client.destroy()
+		})
+
+		it('asks for details when a details update carries none', async () => {
+			const client = await connected()
+			page.send(json({ update: { streamID: 'localStream', action: 'details', value: null } }))
+			await vi.waitFor(() =>
+				expect(fromClient.slice(1)).toContainEqual(expect.objectContaining({ action: 'getDetails' })),
+			)
+			client.destroy()
+		})
 	})
 
 	it('does not send while disconnected', () => {

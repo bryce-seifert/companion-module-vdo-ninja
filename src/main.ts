@@ -89,8 +89,8 @@ export default class VDONinjaInstance extends InstanceBase<ModuleSchema> {
 		this.setPresetDefinitions(structure, presets)
 	}
 
-	sendLocal<K extends keyof LocalCommands>(action: K, args: LocalCommands[K], local = false): void {
-		this.client?.sendLocal(action, args, local)
+	sendLocal<K extends keyof LocalCommands>(action: K, args: LocalCommands[K]): void {
+		this.client?.sendLocal(action, args)
 	}
 
 	sendGuest<K extends keyof GuestCommands>(action: K, target: GuestTarget, args: GuestCommands[K]): void {

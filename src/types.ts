@@ -7,7 +7,8 @@ export type StreamState = {
 	muted?: boolean
 	videoMuted?: boolean
 	speakerMuted?: boolean
-	others?: Record<string, string>
+	/** The state of each director control for this guest, keyed by control name */
+	others?: Record<string, string | boolean>
 	scenes?: Record<string, boolean>
 }
 

@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events'
 import WebSocket from 'ws'
+import type { JsonValue } from '@companion-module/base'
 import {
 	buildRequest,
 	parseDetails,
@@ -23,6 +24,23 @@ export type ClientEvents = {
 	stateChanged: []
 }
 
+/** Local commands whose callback result is the new muted state of the local stream */
+const LocalStateResults = {
+	mic: 'muted',
+	camera: 'videoMuted',
+	speaker: 'speakerMuted',
+} as const satisfies Partial<Record<keyof LocalCommands, keyof StreamState>>
+
+type PendingRequest = {
+	action: string
+	target: GuestTarget | null
+	value: JsonValue | undefined
+	timer: NodeJS.Timeout
+}
+
+/** How long to wait for a callback; VDO.Ninja normally replies within a second */
+const PendingTimeout = 10_000
+
 export type ClientOptions = {
 	url: string
 	apiID: string
@@ -39,6 +57,8 @@ export class VdoNinjaClient extends EventEmitter<ClientEvents> {
 	#reconnectTimer: NodeJS.Timeout | undefined
 	#connected: boolean | null = null
 	#destroyed = false
+	#nextCid = 1
+	readonly #pending = new Map<number, PendingRequest>()
 
 	constructor(options: ClientOptions) {
 		super()
@@ -99,43 +119,67 @@ export class VdoNinjaClient extends EventEmitter<ClientEvents> {
 		clearTimeout(this.#reconnectTimer)
 		this.#ws?.close(1000)
 		this.#ws = undefined
+		for (const { timer } of this.#pending.values()) clearTimeout(timer)
+		this.#pending.clear()
 		this.states = {}
 		this.streams = []
 	}
 
-	sendLocal<K extends keyof LocalCommands>(action: K, args: LocalCommands[K], local = false): void {
-		this.#send(buildRequest(action, null, args, local))
+	sendLocal<K extends keyof LocalCommands>(action: K, args: LocalCommands[K]): void {
+		this.#send(action, null, args)
 	}
 
 	sendGuest<K extends keyof GuestCommands>(action: K, target: GuestTarget, args: GuestCommands[K]): void {
-		this.#send(buildRequest(action, target, args, false))
+		this.#send(action, target, args)
 	}
 
-	#send(request: object): void {
-		if (this.#ws?.readyState === WebSocket.OPEN) {
-			this.#ws.send(JSON.stringify(request))
+	/** Requests awaiting a callback, for tests */
+	get pendingRequests(): number {
+		return this.#pending.size
+	}
+
+	#send(action: string, target: GuestTarget | null, args: { value?: JsonValue; value2?: JsonValue }): void {
+		if (this.#ws?.readyState !== WebSocket.OPEN) return
+
+		const cid = this.#nextCid++
+		const timer = setTimeout(() => this.#pending.delete(cid), PendingTimeout)
+		this.#pending.set(cid, { action, target, value: args.value, timer })
+		this.#ws.send(JSON.stringify(buildRequest(action, target, args, cid)))
+	}
+
+	/** Callbacks are relayed to every controller on the API ID, so only our own requests are matched */
+	#takePending(cid: number | undefined): PendingRequest | undefined {
+		if (cid === undefined) return undefined
+		const request = this.#pending.get(cid)
+		if (request) {
+			clearTimeout(request.timer)
+			this.#pending.delete(cid)
 		}
+		return request
+	}
+
+	#applyResult(request: PendingRequest, result: JsonValue): void {
+		// A toggle is followed by an update with the new state, so only explicit values are applied here
+		if (request.target !== null || request.value === 'toggle' || typeof result !== 'boolean') return
+		if (!(request.action in LocalStateResults)) return
+
+		const field = LocalStateResults[request.action as keyof typeof LocalStateResults]
+		for (const state of Object.values(this.states)) {
+			if (state.localStream) state[field] = result
+		}
+		this.emit('stateChanged')
 	}
 
 	handleMessage(text: string): void {
 		const message = parseMessage(text)
 		switch (message.type) {
 			case 'callback': {
-				const { action, value, local, result } = message.callback
+				const { action, cid, result } = message.callback
+				const request = this.#takePending(cid)
 				if (action == 'getDetails') {
-					for (const details of parseDetails(result)) {
-						this.processDetails(details)
-					}
-				} else if (
-					local &&
-					(action === 'mic' || action === 'camera' || action === 'speaker') &&
-					typeof result === 'boolean'
-				) {
-					for (const state of Object.values(this.states)) {
-						if (state.localStream && value !== 'toggle') {
-							this.processUpdate({ streamID: state.streamID, action, value: result })
-						}
-					}
+					this.#applyDetails(result)
+				} else if (request) {
+					this.#applyResult(request, result)
 				}
 				break
 			}
@@ -148,7 +192,22 @@ export class VdoNinjaClient extends EventEmitter<ClientEvents> {
 		}
 	}
 
-	processDetails(data: StreamState): void {
+	/** Stores the details of each stream given, returning false when there were none */
+	#applyDetails(result: JsonValue): boolean {
+		const entries = parseDetails(result)
+		if (entries.length === 0) return false
+
+		let streamsChanged = false
+		for (const details of entries) {
+			if (this.#storeDetails(details)) streamsChanged = true
+		}
+		if (streamsChanged) this.emit('streamsChanged')
+		this.emit('stateChanged')
+		return true
+	}
+
+	/** Returns whether the stream is new or its label changed, which is what per-stream definitions depend on */
+	#storeDetails(data: StreamState): boolean {
 		this.states[data.streamID] = data
 		let label = data.streamID
 		const name = data.label ? `(${data.label})` : ''
@@ -165,19 +224,22 @@ export class VdoNinjaClient extends EventEmitter<ClientEvents> {
 			label = `${label} (Local)`
 		}
 
-		const streamObject = { id: data.streamID, label: label }
-
 		const index = this.streams.findIndex((o) => o.id === data.streamID)
-		if (index !== -1) {
-			this.streams.splice(index, 1, streamObject)
-		} else {
-			this.streams.push(streamObject)
+		if (index === -1) {
+			this.streams.push({ id: data.streamID, label })
+			return true
 		}
-		this.emit('streamsChanged')
-		this.emit('stateChanged')
+		if (this.streams[index].label === label) return false
+		this.streams.splice(index, 1, { id: data.streamID, label })
+		return true
 	}
 
 	processUpdate(data: ApiUpdate): void {
+		if (data.action === 'details') {
+			if (!this.#applyDetails(data.value)) this.sendLocal('getDetails', {})
+			return
+		}
+
 		const state = data.streamID ? this.states[data.streamID] : undefined
 		if (state) {
 			switch (data.action) {
@@ -199,19 +261,15 @@ export class VdoNinjaClient extends EventEmitter<ClientEvents> {
 					break
 				case 'muted':
 				case 'remoteMuted':
-				case 'mic':
 					state.muted = data.value
 					break
 				case 'videoMuted':
 				case 'remoteVideoMuted':
-				case 'camera':
 					state.videoMuted = data.value
 					break
 				case 'speakerMuted':
-				case 'speaker':
 					state.speakerMuted = data.value
 					break
-				case 'details':
 				case 'positionChange':
 				case 'newViewConnection':
 					this.sendLocal('getDetails', {})
