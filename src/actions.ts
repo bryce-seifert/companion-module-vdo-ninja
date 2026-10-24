@@ -279,7 +279,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 			description: 'For PowerPoint usage',
 			options: [],
 			callback: () => {
-				self.sendRequest('previousSlide')
+				self.sendRequest('prevSlide')
 			},
 		},
 
@@ -299,7 +299,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 			],
 			callback: (action) => {
 				const decimalValue = action.options.value / 100
-				self.sendRequest('pan', null, decimalValue, true)
+				self.sendRequest('pan', null, decimalValue)
 			},
 		},
 

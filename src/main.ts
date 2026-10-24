@@ -289,13 +289,14 @@ export default class VDONinjaInstance extends InstanceBase<ModuleSchema> {
 		}
 	}
 
-	sendRequest(action: string, target?: string | null, value?: JsonValue, local?: boolean): void {
-		const object = {
+	sendRequest(action: string, target?: string | null, value?: JsonValue, local?: boolean, value2?: JsonValue): void {
+		const object: Record<string, JsonValue> = {
 			action: action ?? 'null',
 			target: target ?? 'null',
 			value: value ?? 'null',
 			local: local ?? false,
 		}
+		if (value2 !== undefined) object.value2 = value2
 		this.ws?.send(JSON.stringify(object))
 	}
 }
