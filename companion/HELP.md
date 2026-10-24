@@ -7,6 +7,9 @@ Control [VDO.Ninja](https://vdo.ninja) settings remotely.
 - Think of an API ID to use for your production. It should be unique and difficult to guess
 - Add your API ID as a URL parameter (ex. `&api=your-unique-api-key`) to your VDO.Ninja URL
 - Add the same API ID in the Companion module settings
+- If you host your own API websocket server, enable **Custom Websockets Server** and enter its domain
+
+This module needs Companion 4.3 or newer.
 
 ### Available Actions
 
@@ -27,6 +30,7 @@ Control [VDO.Ninja](https://vdo.ninja) settings remotely.
 - Force Keyframe
 - Next Slide
 - Previous Slide
+- Pan, Tilt, Zoom and Focus Camera, and Camera Exposure (these need `&ptz` on the camera's VDO.Ninja page)
 
 #### Director
 
@@ -38,9 +42,11 @@ Control [VDO.Ninja](https://vdo.ninja) settings remotely.
 - View Group
 - Join View Group
 - Leave View Group
-- Highlight Video Control
+- Toggle Highlight Video
 
 ##### Targets a room guest
+
+The **Guest** field takes the guest's slot number (1, 2, …) or stream ID, and can use variables.
 
 - Guest Mic
 - Guest Speaker
@@ -51,7 +57,7 @@ Control [VDO.Ninja](https://vdo.ninja) settings remotely.
 - Guest Mic in Scene
 - Guest in Group
 - Guest Blind
-- Guest Highlight
+- Toggle Guest Highlight
 - Solo Talk
 - Two-way Solo Talk
 - Force Keyframe
@@ -63,6 +69,8 @@ Control [VDO.Ninja](https://vdo.ninja) settings remotely.
 - Camera Status
 - Speaker Status
 - Guest in Scene
+
+The status feedbacks are active when the stream's state matches the **Muted** checkbox. A guest muted or hidden by the director counts as muted.
 
 ### Available Variables
 
