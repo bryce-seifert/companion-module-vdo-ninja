@@ -1,21 +1,31 @@
-import { combineRgb } from '@companion-module/base'
+import {
+	combineRgb,
+	type CompanionPresetDefinitions,
+	type CompanionPresetSection,
+	type CompanionSimplePresetDefinition,
+} from '@companion-module/base'
+import type VDONinjaInstance from './main.js'
+import type { ModuleSchema } from './main.js'
 
-export function getPresets() {
-	let presets = {}
+export function UpdatePresets(self: VDONinjaInstance): void {
+	const presets: CompanionPresetDefinitions<ModuleSchema> = {}
+	const guestPresets: string[] = []
+	const directorPresets: string[] = []
 
 	const ColorWhite = combineRgb(255, 255, 255)
 	const ColorBlack = combineRgb(0, 0, 0)
 	const ColorGreen = combineRgb(0, 200, 0)
 
-	for (let s in this.states) {
-		let stream = this.states[s]
+	const addPreset = (list: string[], id: string, preset: CompanionSimplePresetDefinition<ModuleSchema>) => {
+		presets[id] = preset
+		list.push(id)
+	}
 
+	for (const stream of Object.values(self.states)) {
 		if (stream.position && !stream.director) {
-			presets[`guest_${stream.position}_mic`] = {
-				type: 'button',
-				category: 'Guest Actions',
+			addPreset(guestPresets, `guest_${stream.position}_mic`, {
+				type: 'simple',
 				name: `guest_${stream.position}_mic`,
-				options: {},
 				style: {
 					text: `$(VDO.Ninja:guest_${stream.position}_label)\\nMic\\n$(VDO.Ninja:guest_${stream.position}_mic)`,
 					size: 'auto',
@@ -41,20 +51,17 @@ export function getPresets() {
 							{
 								actionId: 'guestMic',
 								options: {
-									target: stream.position,
-									value: 'toggle',
+									target: String(stream.position),
 								},
 							},
 						],
 						up: [],
 					},
 				],
-			}
-			presets[`guest_${stream.position}_camera`] = {
-				type: 'button',
-				category: 'Guest Actions',
+			})
+			addPreset(guestPresets, `guest_${stream.position}_camera`, {
+				type: 'simple',
 				name: `guest_${stream.position}_camera`,
-				options: {},
 				style: {
 					text: `$(VDO.Ninja:guest_${stream.position}_label)\\nCamera\\n$(VDO.Ninja:guest_${stream.position}_camera)`,
 					size: 'auto',
@@ -80,13 +87,11 @@ export function getPresets() {
 						up: [],
 					},
 				],
-			}
+			})
 		} else if (stream.director) {
-			presets[`director_mic`] = {
-				type: 'button',
-				category: 'Director Actions',
+			addPreset(directorPresets, `director_mic`, {
+				type: 'simple',
 				name: stream.streamID,
-				options: {},
 				style: {
 					text: `Director\\nMic\\n$(VDO.Ninja:director_mic)`,
 					size: 'auto',
@@ -119,12 +124,10 @@ export function getPresets() {
 						up: [],
 					},
 				],
-			}
-			presets[`director_camera`] = {
-				type: 'button',
-				category: 'Director Actions',
+			})
+			addPreset(directorPresets, `director_camera`, {
+				type: 'simple',
 				name: stream.streamID,
-				options: {},
 				style: {
 					text: `Director\\nCamera\\n$(VDO.Ninja:director_camera)`,
 					size: 'auto',
@@ -157,12 +160,10 @@ export function getPresets() {
 						up: [],
 					},
 				],
-			}
-			presets[`director_speaker`] = {
-				type: 'button',
-				category: 'Director Actions',
+			})
+			addPreset(directorPresets, `director_speaker`, {
+				type: 'simple',
 				name: stream.streamID,
-				options: {},
 				style: {
 					text: `Director\\nSpeaker\\n$(VDO.Ninja:director_speaker)`,
 					size: 'auto',
@@ -195,9 +196,14 @@ export function getPresets() {
 						up: [],
 					},
 				],
-			}
+			})
 		}
 	}
 
-	return presets
+	const structure: CompanionPresetSection<ModuleSchema>[] = [
+		{ id: 'guest', name: 'Guest Actions', definitions: guestPresets },
+		{ id: 'director', name: 'Director Actions', definitions: directorPresets },
+	]
+
+	self.setPresetDefinitions(structure, presets)
 }

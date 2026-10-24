@@ -1,11 +1,65 @@
-export function getActions() {
-	let mutableChoices = [
+import type { DropdownChoice } from '@companion-module/base'
+import type VDONinjaInstance from './main.js'
+
+type MutableValue = 'toggle' | 'true' | 'false'
+
+type NoOptions = { options: Record<string, never> }
+type ValueOption<T> = { options: { value: T } }
+type GuestOption = { options: { target: string } }
+type GuestValueOptions<T> = { options: { target: string; value: T } }
+
+export type ActionsSchema = {
+	speaker: ValueOption<MutableValue>
+	mic: ValueOption<MutableValue>
+	camera: ValueOption<MutableValue>
+	volume: ValueOption<number>
+	sendChat: ValueOption<string>
+	record: ValueOption<'true' | 'false'>
+	reload: NoOptions
+	hangup: NoOptions
+	bitrate: { options: { value: 'true' | 'false' | 'custom'; bitrate: number } }
+	panning: ValueOption<number>
+	togglehand: NoOptions
+	togglescreenshare: NoOptions
+	forceKeyframe: NoOptions
+	nextSlide: NoOptions
+	previousSlide: NoOptions
+	ptzPan: ValueOption<number>
+	ptzTilt: ValueOption<number>
+	ptzZoom: ValueOption<number>
+	ptzFocus: ValueOption<number>
+	ptzExposure: ValueOption<number>
+	group: ValueOption<number>
+	joinGroup: ValueOption<number>
+	leaveGroup: ValueOption<number>
+	viewGroup: ValueOption<number>
+	joinViewGroup: ValueOption<number>
+	leaveViewGroup: ValueOption<number>
+	soloVideo: NoOptions
+	guestForward: GuestValueOptions<string>
+	guestAddScene: GuestValueOptions<string>
+	guestMuteScene: GuestValueOptions<string>
+	guestGroup: GuestValueOptions<string>
+	guestMic: GuestOption
+	guestHangup: GuestOption
+	guestSoloChat: GuestOption
+	guestAltSoloChat: GuestOption
+	guestSpeaker: GuestOption
+	guestDisplay: GuestOption
+	guestOverlay: GuestValueOptions<string>
+	guestForceKeyframe: GuestOption
+	guestSoloVideo: GuestOption
+	guestVolume: GuestValueOptions<number>
+}
+
+export function UpdateActions(self: VDONinjaInstance): void {
+	const mutableChoices: DropdownChoice<MutableValue>[] = [
 		{ id: 'toggle', label: 'Toggle' },
 		{ id: 'true', label: 'Unmute' },
 		{ id: 'false', label: 'Mute' },
 	]
 
-	let actions = {
+	self.setActionDefinitions({
 		speaker: {
 			name: 'Local: Speaker Control',
 			description: 'Mute, unmute or toggle the local speaker',
@@ -19,7 +73,7 @@ export function getActions() {
 				},
 			],
 			callback: (action) => {
-				this.sendRequest('speaker', null, action.options.value)
+				self.sendRequest('speaker', null, action.options.value)
 			},
 		},
 
@@ -36,7 +90,7 @@ export function getActions() {
 				},
 			],
 			callback: (action) => {
-				this.sendRequest('mic', null, action.options.value, true)
+				self.sendRequest('mic', null, action.options.value, true)
 			},
 		},
 
@@ -53,7 +107,7 @@ export function getActions() {
 				},
 			],
 			callback: (action) => {
-				this.sendRequest('camera', null, action.options.value, true)
+				self.sendRequest('camera', null, action.options.value, true)
 			},
 		},
 
@@ -72,7 +126,7 @@ export function getActions() {
 				},
 			],
 			callback: (action) => {
-				this.sendRequest('volume', null, action.options.value)
+				self.sendRequest('volume', null, action.options.value)
 			},
 		},
 
@@ -88,9 +142,8 @@ export function getActions() {
 					useVariables: true,
 				},
 			],
-			callback: async (action, context) => {
-				const value = await context.parseVariablesInString(action.options.value)
-				this.sendRequest('sendChat', null, value)
+			callback: (action) => {
+				self.sendRequest('sendChat', null, action.options.value)
 			},
 		},
 
@@ -110,7 +163,7 @@ export function getActions() {
 				},
 			],
 			callback: (action) => {
-				this.sendRequest('record', null, action.options.value)
+				self.sendRequest('record', null, action.options.value)
 			},
 		},
 
@@ -119,7 +172,7 @@ export function getActions() {
 			description: 'Reload the current page',
 			options: [],
 			callback: () => {
-				this.sendRequest('reload')
+				self.sendRequest('reload')
 			},
 		},
 
@@ -128,7 +181,7 @@ export function getActions() {
 			description: 'Hang up the current connection.',
 			options: [],
 			callback: () => {
-				this.sendRequest('hangup')
+				self.sendRequest('hangup')
 			},
 		},
 
@@ -153,11 +206,12 @@ export function getActions() {
 					id: 'bitrate',
 					default: 1500,
 					min: 0,
+					max: 100000,
 					range: false,
 				},
 			],
 			callback: (action) => {
-				this.sendRequest(
+				self.sendRequest(
 					'bitrate',
 					null,
 					action.options.value === 'custom' ? action.options.bitrate : action.options.value,
@@ -180,7 +234,7 @@ export function getActions() {
 				},
 			],
 			callback: (action) => {
-				this.sendRequest('panning', null, action.options.value)
+				self.sendRequest('panning', null, action.options.value)
 			},
 		},
 
@@ -189,7 +243,7 @@ export function getActions() {
 			description: 'Toggles whether your hand is raised or not',
 			options: [],
 			callback: () => {
-				this.sendRequest('togglehand')
+				self.sendRequest('togglehand')
 			},
 		},
 
@@ -198,7 +252,7 @@ export function getActions() {
 			description: 'Toggles screen sharing on or off - will prompt you to select the screen',
 			options: [],
 			callback: () => {
-				this.sendRequest('togglescreenshare')
+				self.sendRequest('togglescreenshare')
 			},
 		},
 
@@ -207,7 +261,7 @@ export function getActions() {
 			description: 'Forces the publisher of a stream to issue keyframes to all viewers',
 			options: [],
 			callback: () => {
-				this.sendRequest('forceKeyframe')
+				self.sendRequest('forceKeyframe')
 			},
 		},
 
@@ -216,7 +270,7 @@ export function getActions() {
 			description: 'For PowerPoint usage',
 			options: [],
 			callback: () => {
-				this.sendRequest('nextSlide')
+				self.sendRequest('nextSlide')
 			},
 		},
 
@@ -225,7 +279,7 @@ export function getActions() {
 			description: 'For PowerPoint usage',
 			options: [],
 			callback: () => {
-				this.sendRequest('previousSlide')
+				self.sendRequest('previousSlide')
 			},
 		},
 
@@ -245,7 +299,7 @@ export function getActions() {
 			],
 			callback: (action) => {
 				const decimalValue = action.options.value / 100
-				this.sendRequest('pan', null, decimalValue, true)
+				self.sendRequest('pan', null, decimalValue, true)
 			},
 		},
 
@@ -265,7 +319,7 @@ export function getActions() {
 			],
 			callback: (action) => {
 				const decimalValue = action.options.value / 100
-				this.sendRequest('tilt', null, decimalValue)
+				self.sendRequest('tilt', null, decimalValue)
 			},
 		},
 
@@ -285,7 +339,7 @@ export function getActions() {
 			],
 			callback: (action) => {
 				const decimalValue = action.options.value / 100
-				this.sendRequest('zoom', null, decimalValue)
+				self.sendRequest('zoom', null, decimalValue)
 			},
 		},
 
@@ -305,7 +359,7 @@ export function getActions() {
 			],
 			callback: (action) => {
 				const decimalValue = action.options.value / 100
-				this.sendRequest('focus', null, decimalValue)
+				self.sendRequest('focus', null, decimalValue)
 			},
 		},
 
@@ -325,7 +379,7 @@ export function getActions() {
 			],
 			callback: (action) => {
 				const decimalValue = action.options.value / 100
-				this.sendRequest('exposure', null, decimalValue)
+				self.sendRequest('exposure', null, decimalValue)
 			},
 		},
 
@@ -343,7 +397,7 @@ export function getActions() {
 				},
 			],
 			callback: (action) => {
-				this.sendRequest('group', null, action.options.value)
+				self.sendRequest('group', null, action.options.value)
 			},
 		},
 
@@ -361,7 +415,7 @@ export function getActions() {
 				},
 			],
 			callback: (action) => {
-				this.sendRequest('joinGroup', null, action.options.value)
+				self.sendRequest('joinGroup', null, action.options.value)
 			},
 		},
 
@@ -379,7 +433,7 @@ export function getActions() {
 				},
 			],
 			callback: (action) => {
-				this.sendRequest('leaveGroup', null, action.options.value)
+				self.sendRequest('leaveGroup', null, action.options.value)
 			},
 		},
 
@@ -397,7 +451,7 @@ export function getActions() {
 				},
 			],
 			callback: (action) => {
-				this.sendRequest('viewGroup', null, action.options.value)
+				self.sendRequest('viewGroup', null, action.options.value)
 			},
 		},
 
@@ -415,7 +469,7 @@ export function getActions() {
 				},
 			],
 			callback: (action) => {
-				this.sendRequest('joinViewGroup', null, action.options.value)
+				self.sendRequest('joinViewGroup', null, action.options.value)
 			},
 		},
 
@@ -433,7 +487,7 @@ export function getActions() {
 				},
 			],
 			callback: (action) => {
-				this.sendRequest('leaveViewGroup', null, action.options.value)
+				self.sendRequest('leaveViewGroup', null, action.options.value)
 			},
 		},
 
@@ -441,8 +495,8 @@ export function getActions() {
 			name: 'Director: Toggle Highlight Video',
 			description: 'Toggles highlighting your video for all guests',
 			options: [],
-			callback: (action) => {
-				this.sendRequest('soloVideo', action.options.value)
+			callback: () => {
+				self.sendRequest('soloVideo')
 			},
 		},
 
@@ -466,10 +520,8 @@ export function getActions() {
 					useVariables: true,
 				},
 			],
-			callback: async (action, context) => {
-				const target = await context.parseVariablesInString(action.options.target)
-				const value = await context.parseVariablesInString(action.options.value)
-				this.sendRequest('forward', target, value)
+			callback: (action) => {
+				self.sendRequest('forward', action.options.target, action.options.value)
 			},
 		},
 
@@ -493,10 +545,8 @@ export function getActions() {
 					useVariables: true,
 				},
 			],
-			callback: async (action, context) => {
-				const target = await context.parseVariablesInString(action.options.target)
-				const value = await context.parseVariablesInString(action.options.value)
-				this.sendRequest('addScene', target, value)
+			callback: (action) => {
+				self.sendRequest('addScene', action.options.target, action.options.value)
 			},
 		},
 
@@ -520,10 +570,8 @@ export function getActions() {
 					useVariables: true,
 				},
 			],
-			callback: async (action, context) => {
-				const target = await context.parseVariablesInString(action.options.target)
-				const value = await context.parseVariablesInString(action.options.value)
-				this.sendRequest('muteScene', target, value)
+			callback: (action) => {
+				self.sendRequest('muteScene', action.options.target, action.options.value)
 			},
 		},
 
@@ -547,10 +595,8 @@ export function getActions() {
 					useVariables: true,
 				},
 			],
-			callback: async (action, context) => {
-				const target = await context.parseVariablesInString(action.options.target)
-				const value = await context.parseVariablesInString(action.options.value)
-				this.sendRequest('group', target, value)
+			callback: (action) => {
+				self.sendRequest('group', action.options.target, action.options.value)
 			},
 		},
 
@@ -567,9 +613,8 @@ export function getActions() {
 					useVariables: true,
 				},
 			],
-			callback: async (action, context) => {
-				const target = await context.parseVariablesInString(action.options.target)
-				this.sendRequest('mic', target)
+			callback: (action) => {
+				self.sendRequest('mic', action.options.target)
 			},
 		},
 
@@ -586,9 +631,8 @@ export function getActions() {
 					useVariables: true,
 				},
 			],
-			callback: async (action, context) => {
-				const target = await context.parseVariablesInString(action.options.target)
-				this.sendRequest('hangup', target)
+			callback: (action) => {
+				self.sendRequest('hangup', action.options.target)
 			},
 		},
 
@@ -605,9 +649,8 @@ export function getActions() {
 					useVariables: true,
 				},
 			],
-			callback: async (action, context) => {
-				const target = await context.parseVariablesInString(action.options.target)
-				this.sendRequest('soloChat', target, null)
+			callback: (action) => {
+				self.sendRequest('soloChat', action.options.target, null)
 			},
 		},
 
@@ -624,9 +667,8 @@ export function getActions() {
 					useVariables: true,
 				},
 			],
-			callback: async (action, context) => {
-				const target = await context.parseVariablesInString(action.options.target)
-				this.sendRequest('soloChatBidirectional', target, null)
+			callback: (action) => {
+				self.sendRequest('soloChatBidirectional', action.options.target, null)
 			},
 		},
 
@@ -643,9 +685,8 @@ export function getActions() {
 					useVariables: true,
 				},
 			],
-			callback: async (action, context) => {
-				const target = await context.parseVariablesInString(action.options.target)
-				this.sendRequest('speaker', target)
+			callback: (action) => {
+				self.sendRequest('speaker', action.options.target)
 			},
 		},
 
@@ -662,9 +703,8 @@ export function getActions() {
 					useVariables: true,
 				},
 			],
-			callback: async (action, context) => {
-				const target = await context.parseVariablesInString(action.options.target)
-				this.sendRequest('display', target)
+			callback: (action) => {
+				self.sendRequest('display', action.options.target)
 			},
 		},
 
@@ -688,10 +728,8 @@ export function getActions() {
 					useVariables: true,
 				},
 			],
-			callback: async (action, context) => {
-				const target = await context.parseVariablesInString(action.options.target)
-				const value = await context.parseVariablesInString(action.options.value)
-				this.sendRequest('sendDirectorChat', target, value)
+			callback: (action) => {
+				self.sendRequest('sendDirectorChat', action.options.target, action.options.value)
 			},
 		},
 
@@ -708,9 +746,8 @@ export function getActions() {
 					useVariables: true,
 				},
 			],
-			callback: async (action, context) => {
-				const target = await context.parseVariablesInString(action.options.target)
-				this.sendRequest('forceKeyframe', target)
+			callback: (action) => {
+				self.sendRequest('forceKeyframe', action.options.target)
 			},
 		},
 
@@ -727,9 +764,8 @@ export function getActions() {
 					useVariables: true,
 				},
 			],
-			callback: async (action, context) => {
-				const target = await context.parseVariablesInString(action.options.target)
-				this.sendRequest('soloVideo', target)
+			callback: (action) => {
+				self.sendRequest('soloVideo', action.options.target)
 			},
 		},
 
@@ -755,11 +791,9 @@ export function getActions() {
 					range: false,
 				},
 			],
-			callback: async (action, context) => {
-				const target = await context.parseVariablesInString(action.options.target)
-				this.sendRequest('volume', target, action.options.value)
+			callback: (action) => {
+				self.sendRequest('volume', action.options.target, action.options.value)
 			},
 		},
-	}
-	return actions
+	})
 }
