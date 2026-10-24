@@ -160,7 +160,7 @@ export class VdoNinjaClient extends EventEmitter<ClientEvents> {
 
 	#applyResult(request: PendingRequest, result: JsonValue): void {
 		// A toggle is followed by an update with the new state, so only explicit values are applied here
-		if (request.target !== null || request.value === 'toggle' || typeof result !== 'boolean') return
+		if (request.value === 'toggle' || typeof result !== 'boolean') return
 		if (!(request.action in LocalStateResults)) return
 
 		const field = LocalStateResults[request.action as keyof typeof LocalStateResults]
@@ -178,8 +178,11 @@ export class VdoNinjaClient extends EventEmitter<ClientEvents> {
 				const request = this.#takePending(cid)
 				if (action == 'getDetails') {
 					this.#applyDetails(result)
-				} else if (request) {
+				} else if (request?.target === null) {
 					this.#applyResult(request, result)
+				} else if (request) {
+					// VDO.Ninja doesn't push an update after every guest command (setslot, for one)
+					this.sendLocal('getDetails', {})
 				}
 				break
 			}

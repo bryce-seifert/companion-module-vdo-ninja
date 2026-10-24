@@ -268,12 +268,12 @@ describe('VdoNinjaClient connection', () => {
 			client.destroy()
 		})
 
-		it('does not apply the result of a guest command to the local stream', async () => {
+		it('refreshes the details after a guest command instead of applying its result', async () => {
 			const client = await connected()
-			client.sendGuest('mic', 2, {})
+			client.sendGuest('setslot', 2, { value: 3 })
 			await reply(true)
 
-			await vi.waitFor(() => expect(client.pendingRequests).toBe(0))
+			await vi.waitFor(() => expect(fromClient.at(-1)).toMatchObject({ action: 'getDetails' }))
 			expect(client.states.localStream.muted).toBe(false)
 			client.destroy()
 		})
