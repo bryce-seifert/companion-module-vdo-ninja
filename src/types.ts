@@ -9,7 +9,6 @@ export type StreamState = {
 	speakerMuted?: boolean
 	others?: Record<string, string>
 	scenes?: Record<string, boolean>
-	[key: string]: unknown
 }
 
 export type StreamChoice = {

@@ -1,6 +1,15 @@
-import { InstanceBase, InstanceStatus, type JsonValue, type SomeCompanionConfigField } from '@companion-module/base'
+import { InstanceBase, InstanceStatus, type SomeCompanionConfigField } from '@companion-module/base'
 import WebSocket from 'ws'
 import { UpdateActions, type ActionsSchema } from './actions.js'
+import {
+	buildRequest,
+	parseDetails,
+	parseMessage,
+	type ApiUpdate,
+	type GuestCommands,
+	type GuestTarget,
+	type LocalCommands,
+} from './api.js'
 import { GetConfigFields, type ModuleConfig } from './config.js'
 import { UpdateFeedbacks, type FeedbacksSchema } from './feedbacks.js'
 import { UpdatePresets } from './presets.js'
@@ -14,22 +23,6 @@ export type ModuleSchema = {
 	actions: ActionsSchema
 	feedbacks: FeedbacksSchema
 	variables: VariablesSchema
-}
-
-type UpdateMessage = {
-	streamID: string
-	action: string
-	value: JsonValue
-}
-
-type WebSocketMessage = {
-	callback?: {
-		action: string
-		value?: JsonValue
-		local?: boolean
-		result: JsonValue
-	}
-	update?: UpdateMessage
 }
 
 export { UpgradeScripts }
@@ -129,8 +122,8 @@ export default class VDONinjaInstance extends InstanceBase<ModuleSchema> {
 				}
 				this.updateStatus(InstanceStatus.Ok)
 
-				ws.send(`{"join": "${this.config.apiID}" }`)
-				ws.send(`{"action": "getDetails"}`)
+				ws.send(JSON.stringify({ join: this.config.apiID }))
+				this.sendLocal('getDetails', {})
 			})
 
 			ws.on('close', (code) => {
@@ -167,23 +160,29 @@ export default class VDONinjaInstance extends InstanceBase<ModuleSchema> {
 
 	messageReceivedFromWebSocket(data: WebSocket.RawData): void {
 		// eslint-disable-next-line @typescript-eslint/no-base-to-string
-		const message = JSON.parse(data.toString()) as WebSocketMessage
-		if (message?.callback) {
-			const callback = message.callback
-			const result = callback.result
-			if (callback.action == 'getDetails') {
-				for (const details of Object.values(result as Record<string, StreamState>)) {
-					this.processGetDetails(details)
-				}
-			} else if (callback.local) {
-				for (const state of Object.values(this.states)) {
-					if (state.localStream && callback.value !== 'toggle') {
-						this.processUpdate({ streamID: state.streamID, action: callback.action, value: result })
+		const message = parseMessage(data.toString())
+		switch (message.type) {
+			case 'callback': {
+				const { action, value, local, result } = message.callback
+				if (action == 'getDetails') {
+					for (const details of parseDetails(result)) {
+						this.processGetDetails(details)
+					}
+				} else if (local && (action === 'mic' || action === 'camera') && typeof result === 'boolean') {
+					for (const state of Object.values(this.states)) {
+						if (state.localStream && value !== 'toggle') {
+							this.processUpdate({ streamID: state.streamID, action, value: result })
+						}
 					}
 				}
+				break
 			}
-		} else if (message?.update) {
-			this.processUpdate(message.update)
+			case 'update':
+				this.processUpdate(message.update)
+				break
+			case 'ignored':
+				this.log('debug', `Ignored VDO.Ninja message: ${message.reason}`)
+				break
 		}
 	}
 
@@ -223,42 +222,35 @@ export default class VDONinjaInstance extends InstanceBase<ModuleSchema> {
 		this.updateVariables()
 	}
 
-	processUpdate(data: UpdateMessage): void {
-		const state = this.states[data.streamID]
+	processUpdate(data: ApiUpdate): void {
+		const state = data.streamID ? this.states[data.streamID] : undefined
 		if (state) {
 			switch (data.action) {
 				case 'hangup':
 					{
-						delete this.states[data.streamID]
-						const hangup = this.streams.findIndex((o) => o.id === data.streamID)
+						delete this.states[state.streamID]
+						const hangup = this.streams.findIndex((o) => o.id === state.streamID)
 						this.streams.splice(hangup, 1)
 						this.initActions()
 						this.initVariables()
 						this.initFeedbacks()
 					}
 					break
-				case 'newViewConnection':
-					this.ws?.send(`{"action": "getDetails"}`)
-					break
 				case 'director':
-					state.director = data.value as boolean
+					state.director = data.value
 					this.initActions()
 					this.initVariables()
 					this.initFeedbacks()
 					break
 				case 'endViewConnection':
 					{
-						const streamID = data.value as string
-						delete this.states[streamID]
-						const endView = this.streams.findIndex((o) => o.id === streamID)
+						delete this.states[data.value]
+						const endView = this.streams.findIndex((o) => o.id === data.value)
 						this.streams.splice(endView, 1)
 						this.initActions()
 						this.initVariables()
 						this.initFeedbacks()
 					}
-					break
-				case 'positionChange':
-					this.ws?.send(`{"action": "getDetails"}`)
 					break
 				case 'directorMuted':
 					state.others = { ...state.others, 'mute-guest': data.value ? '1' : '0' }
@@ -266,37 +258,38 @@ export default class VDONinjaInstance extends InstanceBase<ModuleSchema> {
 				case 'directorVideoHide':
 					state.others = { ...state.others, 'hide-guest': data.value ? '1' : '0' }
 					break
+				case 'muted':
 				case 'remoteMuted':
 				case 'mic':
-					state.muted = data.value as boolean
+					state.muted = data.value
 					break
+				case 'videoMuted':
 				case 'remoteVideoMuted':
 				case 'camera':
-					state.videoMuted = data.value as boolean
+					state.videoMuted = data.value
+					break
+				case 'speakerMuted':
+					state.speakerMuted = data.value
 					break
 				case 'details':
-					this.ws?.send(`{"action": "getDetails"}`)
-					break
-				default:
-					state[data.action] = data.value
+				case 'positionChange':
+				case 'newViewConnection':
+					this.sendLocal('getDetails', {})
 					break
 			}
 			this.updateVariables()
 			this.checkAllFeedbacks()
 		}
 		if (data.action === 'seeding' || (data.action === 'tracksAdded' && data.value)) {
-			this.ws?.send(`{"action": "getDetails"}`)
+			this.sendLocal('getDetails', {})
 		}
 	}
 
-	sendRequest(action: string, target?: string | null, value?: JsonValue, local?: boolean, value2?: JsonValue): void {
-		const object: Record<string, JsonValue> = {
-			action: action ?? 'null',
-			target: target ?? 'null',
-			value: value ?? 'null',
-			local: local ?? false,
-		}
-		if (value2 !== undefined) object.value2 = value2
-		this.ws?.send(JSON.stringify(object))
+	sendLocal<K extends keyof LocalCommands>(action: K, args: LocalCommands[K], local = false): void {
+		this.ws?.send(JSON.stringify(buildRequest(action, null, args, local)))
+	}
+
+	sendGuest<K extends keyof GuestCommands>(action: K, target: GuestTarget, args: GuestCommands[K]): void {
+		this.ws?.send(JSON.stringify(buildRequest(action, target, args, false)))
 	}
 }
