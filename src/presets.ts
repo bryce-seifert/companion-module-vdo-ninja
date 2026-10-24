@@ -4,10 +4,13 @@ import {
 	type CompanionPresetSection,
 	type CompanionSimplePresetDefinition,
 } from '@companion-module/base'
-import type VDONinjaInstance from './main.js'
 import type { ModuleSchema } from './main.js'
+import type { StreamState } from './types.js'
 
-export function UpdatePresets(self: VDONinjaInstance): void {
+export function GetPresets(states: Record<string, StreamState>): {
+	structure: CompanionPresetSection<ModuleSchema>[]
+	presets: CompanionPresetDefinitions<ModuleSchema>
+} {
 	const presets: CompanionPresetDefinitions<ModuleSchema> = {}
 	const guestPresets: string[] = []
 	const directorPresets: string[] = []
@@ -21,7 +24,7 @@ export function UpdatePresets(self: VDONinjaInstance): void {
 		list.push(id)
 	}
 
-	for (const stream of Object.values(self.states)) {
+	for (const stream of Object.values(states)) {
 		if (stream.position && !stream.director) {
 			addPreset(guestPresets, `guest_${stream.position}_mic`, {
 				type: 'simple',
@@ -205,5 +208,5 @@ export function UpdatePresets(self: VDONinjaInstance): void {
 		{ id: 'director', name: 'Director Actions', definitions: directorPresets },
 	]
 
-	self.setPresetDefinitions(structure, presets)
+	return { structure, presets }
 }

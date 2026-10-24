@@ -1,6 +1,6 @@
-import type { DropdownChoice } from '@companion-module/base'
+import type { CompanionActionDefinitions, DropdownChoice } from '@companion-module/base'
 import type { Toggle } from './api.js'
-import type VDONinjaInstance from './main.js'
+import type { VdoNinjaClient } from './client.js'
 
 type MutableValue = Extract<Toggle, string>
 
@@ -53,14 +53,16 @@ export type ActionsSchema = {
 	guestVolume: GuestValueOptions<number>
 }
 
-export function UpdateActions(self: VDONinjaInstance): void {
+export function GetActions(
+	client: Pick<VdoNinjaClient, 'sendLocal' | 'sendGuest'>,
+): CompanionActionDefinitions<ActionsSchema> {
 	const mutableChoices: DropdownChoice<MutableValue>[] = [
 		{ id: 'toggle', label: 'Toggle' },
 		{ id: 'true', label: 'Unmute' },
 		{ id: 'false', label: 'Mute' },
 	]
 
-	self.setActionDefinitions({
+	return {
 		speaker: {
 			name: 'Local: Speaker Control',
 			description: 'Mute, unmute or toggle the local speaker',
@@ -74,7 +76,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendLocal('speaker', { value: action.options.value })
+				client.sendLocal('speaker', { value: action.options.value }, true)
 			},
 		},
 
@@ -91,7 +93,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendLocal('mic', { value: action.options.value }, true)
+				client.sendLocal('mic', { value: action.options.value }, true)
 			},
 		},
 
@@ -108,7 +110,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendLocal('camera', { value: action.options.value }, true)
+				client.sendLocal('camera', { value: action.options.value }, true)
 			},
 		},
 
@@ -127,7 +129,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendLocal('volume', { value: action.options.value })
+				client.sendLocal('volume', { value: action.options.value })
 			},
 		},
 
@@ -144,7 +146,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendLocal('sendChat', { value: action.options.value })
+				client.sendLocal('sendChat', { value: action.options.value })
 			},
 		},
 
@@ -164,7 +166,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendLocal('record', { value: action.options.value })
+				client.sendLocal('record', { value: action.options.value })
 			},
 		},
 
@@ -173,7 +175,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 			description: 'Reload the current page',
 			options: [],
 			callback: () => {
-				self.sendLocal('reload', {})
+				client.sendLocal('reload', {})
 			},
 		},
 
@@ -182,7 +184,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 			description: 'Hang up the current connection.',
 			options: [],
 			callback: () => {
-				self.sendLocal('hangup', {})
+				client.sendLocal('hangup', {})
 			},
 		},
 
@@ -212,7 +214,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendLocal('bitrate', {
+				client.sendLocal('bitrate', {
 					value: action.options.value === 'custom' ? action.options.bitrate : action.options.value,
 				})
 			},
@@ -233,7 +235,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendLocal('panning', { value: action.options.value })
+				client.sendLocal('panning', { value: action.options.value })
 			},
 		},
 
@@ -242,7 +244,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 			description: 'Toggles whether your hand is raised or not',
 			options: [],
 			callback: () => {
-				self.sendLocal('togglehand', {})
+				client.sendLocal('togglehand', {})
 			},
 		},
 
@@ -251,7 +253,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 			description: 'Toggles screen sharing on or off - will prompt you to select the screen',
 			options: [],
 			callback: () => {
-				self.sendLocal('togglescreenshare', {})
+				client.sendLocal('togglescreenshare', {})
 			},
 		},
 
@@ -260,7 +262,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 			description: 'Forces the publisher of a stream to issue keyframes to all viewers',
 			options: [],
 			callback: () => {
-				self.sendLocal('forceKeyframe', {})
+				client.sendLocal('forceKeyframe', {})
 			},
 		},
 
@@ -269,7 +271,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 			description: 'For PowerPoint usage',
 			options: [],
 			callback: () => {
-				self.sendLocal('nextSlide', {})
+				client.sendLocal('nextSlide', {})
 			},
 		},
 
@@ -278,7 +280,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 			description: 'For PowerPoint usage',
 			options: [],
 			callback: () => {
-				self.sendLocal('prevSlide', {})
+				client.sendLocal('prevSlide', {})
 			},
 		},
 
@@ -298,7 +300,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 			],
 			callback: (action) => {
 				const decimalValue = action.options.value / 100
-				self.sendLocal('pan', { value: decimalValue })
+				client.sendLocal('pan', { value: decimalValue })
 			},
 		},
 
@@ -318,7 +320,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 			],
 			callback: (action) => {
 				const decimalValue = action.options.value / 100
-				self.sendLocal('tilt', { value: decimalValue })
+				client.sendLocal('tilt', { value: decimalValue })
 			},
 		},
 
@@ -338,7 +340,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 			],
 			callback: (action) => {
 				const decimalValue = action.options.value / 100
-				self.sendLocal('zoom', { value: decimalValue })
+				client.sendLocal('zoom', { value: decimalValue })
 			},
 		},
 
@@ -358,7 +360,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 			],
 			callback: (action) => {
 				const decimalValue = action.options.value / 100
-				self.sendLocal('focus', { value: decimalValue })
+				client.sendLocal('focus', { value: decimalValue })
 			},
 		},
 
@@ -378,7 +380,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 			],
 			callback: (action) => {
 				const decimalValue = action.options.value / 100
-				self.sendLocal('exposure', { value: decimalValue })
+				client.sendLocal('exposure', { value: decimalValue })
 			},
 		},
 
@@ -396,7 +398,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendLocal('group', { value: action.options.value })
+				client.sendLocal('group', { value: action.options.value })
 			},
 		},
 
@@ -414,7 +416,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendLocal('joinGroup', { value: action.options.value })
+				client.sendLocal('joinGroup', { value: action.options.value })
 			},
 		},
 
@@ -432,7 +434,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendLocal('leaveGroup', { value: action.options.value })
+				client.sendLocal('leaveGroup', { value: action.options.value })
 			},
 		},
 
@@ -450,7 +452,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendLocal('viewGroup', { value: action.options.value })
+				client.sendLocal('viewGroup', { value: action.options.value })
 			},
 		},
 
@@ -468,7 +470,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendLocal('joinViewGroup', { value: action.options.value })
+				client.sendLocal('joinViewGroup', { value: action.options.value })
 			},
 		},
 
@@ -486,7 +488,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendLocal('leaveViewGroup', { value: action.options.value })
+				client.sendLocal('leaveViewGroup', { value: action.options.value })
 			},
 		},
 
@@ -495,7 +497,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 			description: 'Toggles highlighting your video for all guests',
 			options: [],
 			callback: () => {
-				self.sendLocal('soloVideo', {})
+				client.sendLocal('soloVideo', {})
 			},
 		},
 
@@ -520,7 +522,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendGuest('forward', action.options.target, { value: action.options.value })
+				client.sendGuest('forward', action.options.target, { value: action.options.value })
 			},
 		},
 
@@ -545,7 +547,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendGuest('addScene', action.options.target, { value: action.options.value })
+				client.sendGuest('addScene', action.options.target, { value: action.options.value })
 			},
 		},
 
@@ -570,7 +572,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendGuest('muteScene', action.options.target, { value: action.options.value })
+				client.sendGuest('muteScene', action.options.target, { value: action.options.value })
 			},
 		},
 
@@ -595,7 +597,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendGuest('group', action.options.target, { value: action.options.value })
+				client.sendGuest('group', action.options.target, { value: action.options.value })
 			},
 		},
 
@@ -613,7 +615,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendGuest('mic', action.options.target, {})
+				client.sendGuest('mic', action.options.target, {})
 			},
 		},
 
@@ -631,7 +633,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendGuest('hangup', action.options.target, {})
+				client.sendGuest('hangup', action.options.target, {})
 			},
 		},
 
@@ -649,7 +651,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendGuest('soloChat', action.options.target, {})
+				client.sendGuest('soloChat', action.options.target, {})
 			},
 		},
 
@@ -667,7 +669,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendGuest('soloChatBidirectional', action.options.target, {})
+				client.sendGuest('soloChatBidirectional', action.options.target, {})
 			},
 		},
 
@@ -685,7 +687,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendGuest('speaker', action.options.target, {})
+				client.sendGuest('speaker', action.options.target, {})
 			},
 		},
 
@@ -703,7 +705,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendGuest('display', action.options.target, {})
+				client.sendGuest('display', action.options.target, {})
 			},
 		},
 
@@ -728,7 +730,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendGuest('sendDirectorChat', action.options.target, { value: action.options.value })
+				client.sendGuest('sendDirectorChat', action.options.target, { value: action.options.value })
 			},
 		},
 
@@ -746,7 +748,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendGuest('forceKeyframe', action.options.target, {})
+				client.sendGuest('forceKeyframe', action.options.target, {})
 			},
 		},
 
@@ -764,7 +766,7 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendGuest('soloVideo', action.options.target, {})
+				client.sendGuest('soloVideo', action.options.target, {})
 			},
 		},
 
@@ -791,8 +793,8 @@ export function UpdateActions(self: VDONinjaInstance): void {
 				},
 			],
 			callback: (action) => {
-				self.sendGuest('volume', action.options.target, { value: action.options.value })
+				client.sendGuest('volume', action.options.target, { value: action.options.value })
 			},
 		},
-	})
+	}
 }

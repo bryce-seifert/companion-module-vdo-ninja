@@ -177,6 +177,7 @@ const BooleanUpdateActions = [
 	// Not sent by current VDO.Ninja releases, kept for older ones and for local command callbacks
 	'mic',
 	'camera',
+	'speaker',
 	'remoteMuted',
 ] as const
 

@@ -1,8 +1,8 @@
 export type StreamState = {
 	streamID: string
-	label?: string
-	director?: boolean
-	position?: number
+	label?: string | false
+	director?: boolean | null
+	position?: number | null
 	localStream?: boolean
 	muted?: boolean
 	videoMuted?: boolean

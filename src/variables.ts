@@ -1,12 +1,14 @@
 import type { CompanionVariableDefinitions, CompanionVariableValue } from '@companion-module/base'
-import type VDONinjaInstance from './main.js'
+import type { StreamState } from './types.js'
 
 export type VariablesSchema = Record<string, CompanionVariableValue>
 
-export function UpdateVariableDefinitions(self: VDONinjaInstance): void {
+export function GetVariableDefinitions(
+	states: Record<string, StreamState>,
+): CompanionVariableDefinitions<VariablesSchema> {
 	const variables: CompanionVariableDefinitions<VariablesSchema> = {}
 
-	for (const data of Object.values(self.states)) {
+	for (const data of Object.values(states)) {
 		const name = data.label ? `(${data.label})` : ''
 
 		if (data.streamID) {
@@ -28,11 +30,13 @@ export function UpdateVariableDefinitions(self: VDONinjaInstance): void {
 		}
 	}
 
-	self.setVariableDefinitions(variables)
+	return variables
 }
 
-export function UpdateVariableValues(self: VDONinjaInstance): void {
-	for (const data of Object.values(self.states)) {
+export function GetVariableValues(states: Record<string, StreamState>): VariablesSchema {
+	const values: VariablesSchema = {}
+
+	for (const data of Object.values(states)) {
 		let label = data.label ? data.label : `Guest ${data.position}`
 		const sceneList: string[] = []
 
@@ -47,13 +51,13 @@ export function UpdateVariableValues(self: VDONinjaInstance): void {
 		if (data.streamID) {
 			if (data.director) {
 				label = 'Director'
-				self.setVariableValues({
+				Object.assign(values, {
 					director_mic: data.muted ? 'Muted' : 'Unmuted',
 					director_camera: data.videoMuted ? 'Muted' : 'Unmuted',
 					director_speaker: data.speakerMuted ? 'Muted' : 'Unmuted',
 				})
 			} else if (data.position) {
-				self.setVariableValues({
+				Object.assign(values, {
 					[`guest_${data.position}_streamID`]: data.streamID,
 					[`guest_${data.position}_mic`]: data.muted || data.others?.['mute-guest'] == '1' ? 'Muted' : 'Unmuted',
 					[`guest_${data.position}_camera`]:
@@ -62,7 +66,7 @@ export function UpdateVariableValues(self: VDONinjaInstance): void {
 					[`guest_${data.position}_scenes`]: sceneList.length ? sceneList : 'None',
 				})
 			}
-			self.setVariableValues({
+			Object.assign(values, {
 				[`${data.streamID}_mic`]: data.muted || data.others?.['mute-guest'] == '1' ? 'Muted' : 'Unmuted',
 				[`${data.streamID}_camera`]: data.videoMuted || data.others?.['hide-guest'] == '1' ? 'Muted' : 'Unmuted',
 				[`${data.streamID}_label`]: label,
@@ -70,4 +74,5 @@ export function UpdateVariableValues(self: VDONinjaInstance): void {
 			})
 		}
 	}
+	return values
 }

@@ -1,5 +1,10 @@
-import { combineRgb, type CompanionInputFieldCheckbox, type CompanionInputFieldDropdown } from '@companion-module/base'
-import type VDONinjaInstance from './main.js'
+import {
+	combineRgb,
+	type CompanionFeedbackDefinitions,
+	type CompanionInputFieldCheckbox,
+	type CompanionInputFieldDropdown,
+} from '@companion-module/base'
+import type { VdoNinjaClient } from './client.js'
 
 type StreamStateOptions = {
 	stream: string
@@ -21,7 +26,9 @@ const stateField: CompanionInputFieldCheckbox<'state'> = {
 	default: true,
 }
 
-export function UpdateFeedbacks(self: VDONinjaInstance): void {
+export function GetFeedbacks(
+	client: Pick<VdoNinjaClient, 'states' | 'streams'>,
+): CompanionFeedbackDefinitions<FeedbacksSchema> {
 	const ColorWhite = combineRgb(255, 255, 255)
 	const ColorGreen = combineRgb(0, 200, 0)
 
@@ -30,11 +37,11 @@ export function UpdateFeedbacks(self: VDONinjaInstance): void {
 		label: 'Stream',
 		id: 'stream',
 		allowCustom,
-		default: self.streams[0]?.id ?? '',
-		choices: self.streams,
+		default: client.streams[0]?.id ?? '',
+		choices: client.streams,
 	})
 
-	self.setFeedbackDefinitions({
+	return {
 		mic: {
 			type: 'boolean',
 			name: 'Mic Status',
@@ -45,7 +52,7 @@ export function UpdateFeedbacks(self: VDONinjaInstance): void {
 				bgcolor: ColorGreen,
 			},
 			callback: (feedback) => {
-				const stream = self.states[feedback.options.stream]
+				const stream = client.states[feedback.options.stream]
 				if (!stream) return false
 				if (stream.position && !stream.director && stream.others?.['mute-guest'] == '1') {
 					return feedback.options.state ?? false
@@ -63,7 +70,7 @@ export function UpdateFeedbacks(self: VDONinjaInstance): void {
 				bgcolor: ColorGreen,
 			},
 			callback: (feedback) => {
-				const stream = self.states[feedback.options.stream]
+				const stream = client.states[feedback.options.stream]
 				if (!stream) return false
 				if (stream.position && !stream.director && stream.others?.['hide-guest'] == '1') {
 					return feedback.options.state ?? false
@@ -81,7 +88,7 @@ export function UpdateFeedbacks(self: VDONinjaInstance): void {
 				bgcolor: ColorGreen,
 			},
 			callback: (feedback) => {
-				return self.states[feedback.options.stream]?.speakerMuted === feedback.options.state
+				return client.states[feedback.options.stream]?.speakerMuted === feedback.options.state
 			},
 		},
 		guestScene: {
@@ -102,8 +109,8 @@ export function UpdateFeedbacks(self: VDONinjaInstance): void {
 				bgcolor: ColorGreen,
 			},
 			callback: (feedback) => {
-				return self.states[feedback.options.stream]?.scenes?.[feedback.options.scene] == true
+				return client.states[feedback.options.stream]?.scenes?.[feedback.options.scene] == true
 			},
 		},
-	})
+	}
 }
